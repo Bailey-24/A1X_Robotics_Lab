@@ -1,0 +1,6 @@
+pyroki/
+librealsense/
+install/
+.history/
+__pycache__/
+*.pyc
