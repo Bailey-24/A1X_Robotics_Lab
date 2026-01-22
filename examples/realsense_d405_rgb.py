@@ -89,8 +89,8 @@ def main() -> int:
     config = rs.config()
     
     # Enable color stream - D405 supports up to 1280x720 @ 30fps for color
-    # Using 640x480 @ 30fps for lower latency
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+    # Enable color stream - D405 supports up to 1280x720 @ 15fps max (checked via query)
+    config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 15)
     
     # Start streaming
     try:
@@ -106,13 +106,16 @@ def main() -> int:
         logger.error(f"Failed to start pipeline: {e}")
         return 1
     
-    # Create output directory for saved frames
+    # Create output directory for saved frames and videos
     output_dir = Path(__file__).parent / "captured_frames"
     output_dir.mkdir(exist_ok=True)
     
-    logger.info("Streaming RGB frames... Press 'q' to quit, 's' to save frame")
+    logger.info("Streaming RGB frames... Press 'q' to quit, 's' to save frame, 'v' to toggle recording")
     
     frame_count = 0
+    is_recording = False
+    video_writer = None
+    recording_output_path = None
     
     try:
         while True:
@@ -136,13 +139,27 @@ def main() -> int:
             # Add frame info overlay
             timestamp = color_frame.get_timestamp()
             info_text = f"Frame: {frame_count} | Time: {timestamp:.0f}ms"
+            
+            # Create a copy for display so we don't draw the "REC" indicator on the recorded video
+            display_image = color_image.copy()
+            
             cv2.putText(
-                color_image, info_text, (10, 30),
+                display_image, info_text, (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
             )
+
+            # Record frame if recording is active
+            if is_recording and video_writer is not None:
+                video_writer.write(color_image)
+                # specific visual indicator for recording
+                cv2.circle(display_image, (display_image.shape[1] - 30, 30), 10, (0, 0, 255), -1)
+                cv2.putText(
+                    display_image, "REC", (display_image.shape[1] - 80, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2
+                )
             
             # Display the frame
-            cv2.imshow('RealSense D405 RGB', color_image)
+            cv2.imshow('RealSense D405 RGB', display_image)
             
             # Handle keyboard input
             key = cv2.waitKey(1) & 0xFF
@@ -155,11 +172,40 @@ def main() -> int:
                 filename = output_dir / f"d405_frame_{timestamp_str}.png"
                 cv2.imwrite(str(filename), color_image)
                 logger.info(f"Frame saved to {filename}")
+            elif key == ord('v'):  # Toggle recording
+                if is_recording:
+                    # Stop recording
+                    is_recording = False
+                    if video_writer:
+                        video_writer.release()
+                        video_writer = None
+                    logger.info(f"Recording stopped. Saved to {recording_output_path}")
+                else:
+                    # Start recording
+                    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    recording_output_path = output_dir / f"d405_video_{timestamp_str}.mp4"
+                    
+                    # Define codec and create VideoWriter
+                    # mp4v is generally safe for mp4. If it fails, try 'avc1' or 'XVID'
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+                    fps = 30.0 # Assuming 30fps based on config
+                    frame_size = (color_image.shape[1], color_image.shape[0])
+                    
+                    video_writer = cv2.VideoWriter(str(recording_output_path), fourcc, fps, frame_size)
+                    
+                    if video_writer.isOpened():
+                        is_recording = True
+                        logger.info(f"Recording started: {recording_output_path}")
+                    else:
+                        logger.error("Failed to start video recording")
+                        video_writer = None
                 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     finally:
         # Cleanup
+        if video_writer:
+            video_writer.release()
         pipeline.stop()
         cv2.destroyAllWindows()
         logger.info(f"Streaming stopped. Total frames captured: {frame_count}")

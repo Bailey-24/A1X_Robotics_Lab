@@ -1,0 +1,5 @@
+- [x] Implement `02_phone_ik.py` <!-- id: 0 -->
+    - [x] Setup `ARDataSubscriber` thread <!-- id: 1 -->
+    - [x] Implement relative pose calculation <!-- id: 2 -->
+    - [x] Integrate with Viser loop <!-- id: 3 -->
+- [x] Verify with simulated mock data (if phone not available) or instructions for user <!-- id: 4 -->
