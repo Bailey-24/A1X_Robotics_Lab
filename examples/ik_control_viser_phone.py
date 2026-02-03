@@ -18,7 +18,10 @@ SAFETY: Robot control is DISABLED by default. Enable it via the checkbox in the 
 import sys
 import os
 import time
+import threading
+import copy
 from pathlib import Path
+from typing import Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,6 +30,7 @@ import numpy as np
 import viser
 from viser.extras import ViserUrdf
 import yourdfpy
+from scipy.spatial.transform import Rotation as R
 
 # PyRoki imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "pyroki" / "examples"))
@@ -35,6 +39,77 @@ import pyroki_snippets as pks
 
 # A1X control imports
 import a1x_control
+
+# Phone control imports
+try:
+    from asmagic import ARDataSubscriber
+    PHONE_AVAILABLE = True
+except ImportError:
+    PHONE_AVAILABLE = False
+    print("WARNING: asmagic not installed, phone control disabled")
+
+
+# Default phone IP
+DEFAULT_PHONE_IP = "192.168.31.159"
+
+
+class PhoneListener:
+    """Thread-safe listener for iPhone 6D pose data via AsMagic."""
+    
+    def __init__(self, ip: str):
+        self.ip = ip
+        self.latest_pose: Optional[np.ndarray] = None
+        self.lock = threading.Lock()
+        self.running = True
+        self.connected = False
+        self.error_msg = ""
+        self._reset_origin_flag = False
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+    
+    def _run(self) -> None:
+        """Background thread to receive phone pose data."""
+        print(f"Connecting to phone at {self.ip}...")
+        try:
+            self.sub = ARDataSubscriber(self.ip)
+            self.connected = True
+            print("Phone connected.")
+            for data in self.sub:
+                if not self.running:
+                    break
+                if hasattr(data, 'local_pose') and data.local_pose is not None:
+                    # Expecting [x, y, z, qx, qy, qz, qw]
+                    pose = np.array(data.local_pose)
+                    if pose.shape[0] == 7:
+                        with self.lock:
+                            self.latest_pose = pose
+        except Exception as e:
+            print(f"Phone listener error: {e}")
+            self.error_msg = str(e)
+            self.connected = False
+        finally:
+            if hasattr(self, 'sub'):
+                self.sub.close()
+    
+    def get_pose(self) -> Optional[np.ndarray]:
+        """Get latest phone pose (thread-safe copy)."""
+        with self.lock:
+            return self.latest_pose.copy() if self.latest_pose is not None else None
+    
+    def request_origin_reset(self) -> None:
+        """Signal that phone origin should be reset."""
+        self._reset_origin_flag = True
+    
+    def check_and_clear_reset(self) -> bool:
+        """Check if reset was requested and clear the flag."""
+        if self._reset_origin_flag:
+            self._reset_origin_flag = False
+            return True
+        return False
+    
+    def stop(self) -> None:
+        """Stop the listener thread."""
+        self.running = False
 
 
 def load_a1x_urdf() -> yourdfpy.URDF:
@@ -154,6 +229,15 @@ def main():
             step=5.0,
             initial_value=20.0,
         )
+
+        # Smoothing factor
+        smoothing_alpha = server.gui.add_slider(
+            "Smoothing Alpha",
+            min=0.01,
+            max=1.0,
+            step=0.01,
+            initial_value=0.2,
+        )
     
     # Folder for status displays
     with server.gui.add_folder("Status"):
@@ -223,6 +307,41 @@ def main():
                 
                 print(f"Synced target to: pos={ee_pose[4:7]}, wxyz={ee_pose[0:4]}")
     
+    # --- Phone Control UI ---
+    phone_listener: Optional[PhoneListener] = None
+    
+    with server.gui.add_folder("Phone Control"):
+        if not PHONE_AVAILABLE:
+            server.gui.add_markdown("**asmagic not installed**")
+        
+        phone_ip_input = server.gui.add_text(
+            "Phone IP",
+            initial_value=DEFAULT_PHONE_IP,
+        )
+        
+        enable_phone = server.gui.add_checkbox(
+            "Enable Phone Control",
+            initial_value=False,
+            disabled=not PHONE_AVAILABLE,
+        )
+        
+        reset_phone_btn = server.gui.add_button(
+            "Reset Phone Origin",
+            disabled=not PHONE_AVAILABLE,
+        )
+        
+        phone_status_display = server.gui.add_text(
+            "Phone Status",
+            initial_value="Disabled",
+        )
+        
+        @reset_phone_btn.on_click
+        def on_reset_phone_click(_) -> None:
+            nonlocal phone_base_pos, phone_base_rot_inv
+            phone_base_pos = None
+            phone_base_rot_inv = None
+            print("Phone origin will be reset on next frame")
+    
     print()
     print("=" * 60)
     print("READY! Open http://localhost:8080/ in your browser")
@@ -232,6 +351,7 @@ def main():
     print("  - Drag the RED SPHERE to set IK target position")
     print("  - Use rotation handles for orientation")
     print("  - Check 'Enable Robot Control' to send commands to robot")
+    print("  - Check 'Enable Phone Control' to use iPhone as input")
     print("  - Adjust 'Control Rate' for command frequency")
     print()
     print("Press Ctrl+C to exit")
@@ -241,15 +361,102 @@ def main():
     # 5. Main control loop
     # =========================================================================
     last_solution = None
+    
+    # Initialize last_solution with current robot state if available
+    initial_joints = controller.get_joint_states()
+    if initial_joints:
+        cfg = []
+        for name in ['arm_joint1', 'arm_joint2', 'arm_joint3', 
+                     'arm_joint4', 'arm_joint5', 'arm_joint6']:
+            cfg.append(initial_joints.get(name, 0.0))
+        # Add gripper joints to match robot DOF (8)
+        cfg.extend([0.0, 0.0])
+        last_solution = np.array(cfg)
+
+    # Initialize smoothed_solution with correct shape (8 for A1X)
+    smoothed_solution = last_solution.copy() if last_solution is not None else np.zeros(8)
     smoothed_timing = 0.0
+    
+    # Phone control state
+    phone_base_pos: Optional[np.ndarray] = None
+    phone_base_rot_inv: Optional[R] = None
+    init_target_pos: Optional[np.ndarray] = None
+    init_target_rot: Optional[R] = None
+    phone_was_enabled = False
     
     try:
         while True:
             loop_start = time.time()
             
-            # --- Read target from Viser ---
-            target_position = np.array(ik_target.position)
-            target_wxyz = np.array(ik_target.wxyz)
+            # --- Handle phone control ---
+            if PHONE_AVAILABLE and enable_phone.value:
+                # Start phone listener if not running
+                if phone_listener is None or not phone_listener.running:
+                    phone_listener = PhoneListener(phone_ip_input.value)
+                
+                # Capture init pose when first enabled
+                if not phone_was_enabled:
+                    init_target_pos = np.array(ik_target.position)
+                    q_init = np.array(ik_target.wxyz)  # wxyz
+                    init_target_rot = R.from_quat([q_init[1], q_init[2], q_init[3], q_init[0]])  # xyzw
+                    phone_base_pos = None  # Will be set on first phone frame
+                    phone_base_rot_inv = None
+                    phone_was_enabled = True
+                    print(f"Phone control enabled, init pose: {init_target_pos}")
+                
+                # Update phone status
+                if phone_listener.connected:
+                    phone_status_display.value = "Connected"
+                else:
+                    phone_status_display.value = phone_listener.error_msg or "Connecting..."
+                
+                # Get phone pose and compute target
+                phone_pose = phone_listener.get_pose()
+                if phone_pose is not None and init_target_pos is not None:
+                    p_curr = phone_pose[:3]
+                    q_curr = phone_pose[3:]  # xyzw
+                    
+                    # Normalize quaternion
+                    norm = np.linalg.norm(q_curr)
+                    if norm > 0:
+                        q_curr = q_curr / norm
+                    
+                    r_curr = R.from_quat(q_curr)
+                    
+                    # Set phone origin if not set
+                    if phone_base_pos is None:
+                        phone_base_pos = p_curr.copy()
+                        phone_base_rot_inv = r_curr.inv()
+                        print("Phone origin set.")
+                    
+                    # Compute deltas
+                    delta_pos = p_curr - phone_base_pos
+                    delta_rot = phone_base_rot_inv * r_curr
+                    
+                    # Apply to initial pose
+                    target_position = init_target_pos + delta_pos
+                    target_rot = init_target_rot * delta_rot
+                    
+                    # Convert to wxyz for Viser
+                    q_tgt = target_rot.as_quat()  # xyzw
+                    target_wxyz = np.array([q_tgt[3], q_tgt[0], q_tgt[1], q_tgt[2]])
+                    
+                    # Update gizmo to show computed target (visual indicator)
+                    ik_target.position = tuple(target_position)
+                    ik_target.wxyz = tuple(target_wxyz)
+                else:
+                    # No phone data yet, use current gizmo position
+                    target_position = np.array(ik_target.position)
+                    target_wxyz = np.array(ik_target.wxyz)
+            else:
+                # Manual mode: read from gizmo
+                if phone_was_enabled:
+                    phone_was_enabled = False
+                    phone_status_display.value = "Disabled"
+                    print("Phone control disabled, resuming gizmo control")
+                
+                target_position = np.array(ik_target.position)
+                target_wxyz = np.array(ik_target.wxyz)
             
             # Update target position display
             target_pos_display.value = (
@@ -266,6 +473,7 @@ def main():
                     target_link_name=target_link_name,
                     target_position=target_position,
                     target_wxyz=target_wxyz,
+                    initial_joint_config=last_solution,
                 )
                 last_solution = solution
                 
@@ -275,21 +483,25 @@ def main():
                 timing_display.value = round(smoothed_timing, 2)
                 
             except Exception as e:
-                print(f"IK solve error: {e}")
+                print(f"IK solve error: {repr(e)}")
                 status_display.value = f"IK Error: {str(e)[:30]}"
                 time.sleep(0.1)
                 continue
             
+            # --- Smoothing ---
+            alpha = smoothing_alpha.value
+            smoothed_solution = alpha * solution + (1 - alpha) * smoothed_solution
+            
             # --- Update visualization ---
-            urdf_vis.update_cfg(solution)
+            urdf_vis.update_cfg(smoothed_solution)
             
             # Update joint displays
             for i in range(6):
-                joint_displays[i].value = round(float(solution[i]), 4)
+                joint_displays[i].value = round(float(smoothed_solution[i]), 4)
             
             # Compute FK to show actual EE position from solution
             target_idx = robot.links.names.index(target_link_name)
-            fk_result = robot.forward_kinematics(solution)
+            fk_result = robot.forward_kinematics(smoothed_solution)
             ee_pose = fk_result[target_idx]
             ee_pos_display.value = (
                 f"x: {ee_pose[4]:.3f}, "
@@ -300,7 +512,7 @@ def main():
             # --- Send to robot (if enabled) ---
             if enable_robot.value:
                 # Extract arm joints only (first 6 of 8)
-                arm_joints = list(solution[:6].astype(float))
+                arm_joints = list(smoothed_solution[:6].astype(float))
                 
                 # Send command
                 success = controller.set_joint_positions(arm_joints)

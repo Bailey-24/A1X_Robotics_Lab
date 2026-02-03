@@ -24,7 +24,7 @@ import yourdfpy
 from pathlib import Path
 
 # Hardcoded IP for now, matching user's example
-PHONE_IP = "192.168.31.13"
+PHONE_IP = "192.168.31.159"
 
 class PhoneListener:
     def __init__(self, ip):

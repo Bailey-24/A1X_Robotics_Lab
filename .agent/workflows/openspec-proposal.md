@@ -1,6 +1,5 @@
 ---
 description: Scaffold a new OpenSpec change and validate strictly.
-auto_execution_mode: 3
 ---
 <!-- OPENSPEC:START -->
 **Guardrails**

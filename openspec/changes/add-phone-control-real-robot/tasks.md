@@ -1,0 +1,16 @@
+- [x] Add `PhoneListener` class to `ik_control_viser.py` <!-- id: 0 -->
+    - [x] Copy and adapt from `02_phone_ik.py` <!-- id: 1 -->
+    - [x] Add `reset_origin()` signaling mechanism <!-- id: 2 -->
+- [x] Add Phone Control UI elements <!-- id: 3 -->
+    - [x] Phone IP text input <!-- id: 4 -->
+    - [x] Enable Phone Control checkbox <!-- id: 5 -->
+    - [x] Reset Phone Origin button <!-- id: 6 -->
+    - [x] Phone Status display <!-- id: 7 -->
+- [x] Integrate phone control into main loop <!-- id: 8 -->
+    - [x] Capture init pose when phone mode enabled <!-- id: 9 -->
+    - [x] Compute delta-based target from phone pose <!-- id: 10 -->
+    - [x] Update gizmo to show computed target (visual indicator) <!-- id: 11 -->
+- [x] Handle phone enable/disable transitions <!-- id: 12 -->
+    - [x] On enable: start listener if not running, capture init pose <!-- id: 13 -->
+    - [x] On disable: resume gizmo control from current position <!-- id: 14 -->
+- [ ] Manual verification with real robot <!-- id: 15 -->

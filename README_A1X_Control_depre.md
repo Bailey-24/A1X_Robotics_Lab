@@ -13,6 +13,16 @@ The A1X Control API provides a clean, Pythonic interface to control the A1X robo
 
 ## Quick Start
 
+## setup can 
+Note: Before starting nodes, please confirm that the CAN driver has been properly configured.
+```bash
+sudo ip link set can0 type can bitrate 1000000 sample-point 0.875 dbitrate 5000000 fd on dsample-point 0.875
+sudo ip link set up can0
+```
+If you encounter the error "RTNETLINK answers: Device or resource busy", it usually means that the device you are trying to configure (such as a network interface or CAN transceiver) has already been configured and is running.   
+
+
+
 ```python
 import a1x_control
 
@@ -28,8 +38,6 @@ controller.set_joint_positions([0.0, 0.0043, -0.1, -0.0347, -0.0055, 0.0013])
 ```
 
 ## Installation
-
-No installation required. Simply ensure you're in the A1X SDK directory:
 
 ```bash
 cd /home/ubuntu/projects/A1Xsdk
