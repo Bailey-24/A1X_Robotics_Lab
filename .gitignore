@@ -9,3 +9,5 @@ useless_file/
 
 *.pt
 *.ts
+
+examples/camera/captured_frames/
