@@ -12,7 +12,7 @@ mounted on the end-effector. Features:
 Usage:
     cd /home/ubuntu/projects/A1Xsdk
     conda activate a1x_ros
-    python handeye/handeye_calibration.py --marker_id 42 --marker_size 0.10
+    python examples/handeye/handeye_calibration.py --marker_id 42 --marker_size 0.10
 
 Then open http://localhost:8080/ in your browser.
 
@@ -45,8 +45,9 @@ except ImportError:
     print("Install with: pip install pyrealsense2")
     sys.exit(1)
 
-# Add parent directory to path for a1x_control
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add project root to path for a1x_control
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 import a1x_control
 
 # Viser and PyRoki imports
@@ -55,7 +56,7 @@ from viser.extras import ViserUrdf
 import yourdfpy
 
 # PyRoki imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "pyroki" / "examples"))
+sys.path.insert(0, str(PROJECT_ROOT / "pyroki" / "examples"))
 import pyroki as pk
 import pyroki_snippets as pks
 
@@ -124,13 +125,13 @@ def rotation_matrix_to_quaternion(R: np.ndarray) -> tuple:
 
 def load_a1x_urdf() -> yourdfpy.URDF:
     """Load the A1X URDF with proper mesh path resolution."""
-    urdf_path = Path("/home/ubuntu/projects/A1Xsdk/install/mobiman/lib/mobiman/configs/urdfs/a1x.urdf")
+    urdf_path = PROJECT_ROOT / "install/mobiman/lib/mobiman/configs/urdfs/a1x.urdf"
     
     def resolve_package_uri(fname: str) -> str:
         package_prefix = "package://mobiman/"
         if fname.startswith(package_prefix):
             relative_path = fname[len(package_prefix):]
-            return str(Path("/home/ubuntu/projects/A1Xsdk/install/mobiman/share/mobiman") / relative_path)
+            return str(PROJECT_ROOT / "install/mobiman/share/mobiman" / relative_path)
         return fname
     
     return yourdfpy.URDF.load(urdf_path, filename_handler=resolve_package_uri)
@@ -287,9 +288,13 @@ class HandEyeCalibrator:
         self.ee_translations: list[np.ndarray] = []
         self.marker_rotations: list[np.ndarray] = []
         self.marker_translations: list[np.ndarray] = []
+        
+        # Raw captured data for saving / offline recalculation
+        self.captured_data: list[dict] = []
     
     def add_pose_pair(
-        self, ee_pose: dict, marker_rvec: np.ndarray, marker_tvec: np.ndarray
+        self, ee_pose: dict, marker_rvec: np.ndarray, marker_tvec: np.ndarray,
+        joint_angles: Optional[list] = None,
     ) -> int:
         """Add a pose pair for calibration."""
         ee_pos = ee_pose['position']
@@ -307,6 +312,18 @@ class HandEyeCalibrator:
         self.ee_translations.append(t_ee)
         self.marker_rotations.append(R_marker)
         self.marker_translations.append(t_marker)
+        
+        # Store raw data for saving
+        self.captured_data.append({
+            'joint_angles': [float(v) for v in joint_angles] if joint_angles else None,
+            'ee_position': [float(ee_pos['x']), float(ee_pos['y']), float(ee_pos['z'])],
+            'ee_orientation_xyzw': [
+                float(ee_ori['x']), float(ee_ori['y']),
+                float(ee_ori['z']), float(ee_ori['w']),
+            ],
+            'marker_rvec': [float(v) for v in marker_rvec.flatten()],
+            'marker_tvec': [float(v) for v in marker_tvec.flatten()],
+        })
         
         return len(self.ee_rotations)
     
@@ -329,6 +346,8 @@ class HandEyeCalibrator:
     def save(self, R: np.ndarray, t: np.ndarray, path: str) -> None:
         """Save calibration to YAML."""
         q = rotation_matrix_to_quaternion(R)
+        # Ensure parent directory exists
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         # Convert to native Python types for clean YAML output
         result = {
             'transformation': {
@@ -346,6 +365,41 @@ class HandEyeCalibrator:
         with open(path, 'w') as f:
             yaml.dump(result, f, default_flow_style=False, sort_keys=False)
         logger.info(f"Calibration saved to: {path}")
+    
+    def save_captured_poses(self, path: str) -> None:
+        """Save all captured pose data (joint angles + marker poses) for offline recalculation."""
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            'marker_id': self.marker_id,
+            'marker_size': self.marker_size,
+            'timestamp': datetime.now().isoformat(),
+            'num_poses': self.num_poses,
+            'poses': self.captured_data,
+        }
+        with open(path, 'w') as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        logger.info(f"Captured poses saved to: {path}")
+    
+    @classmethod
+    def load_captured_poses(cls, path: str) -> 'HandEyeCalibrator':
+        """Load previously captured poses and rebuild calibrator for recalculation."""
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        
+        calibrator = cls(data['marker_id'], data['marker_size'])
+        for pose in data['poses']:
+            ee_pose = {
+                'position': {'x': pose['ee_position'][0], 'y': pose['ee_position'][1], 'z': pose['ee_position'][2]},
+                'orientation': {'x': pose['ee_orientation_xyzw'][0], 'y': pose['ee_orientation_xyzw'][1],
+                                'z': pose['ee_orientation_xyzw'][2], 'w': pose['ee_orientation_xyzw'][3]},
+            }
+            marker_rvec = np.array(pose['marker_rvec'])
+            marker_tvec = np.array(pose['marker_tvec'])
+            calibrator.add_pose_pair(ee_pose, marker_rvec, marker_tvec,
+                                     joint_angles=pose.get('joint_angles'))
+        
+        logger.info(f"Loaded {calibrator.num_poses} poses from {path}")
+        return calibrator
 
 
 def main():
@@ -354,8 +408,138 @@ def main():
     parser.add_argument("--marker_size", type=float, default=0.10)
     parser.add_argument("--dict_type", type=str, default="DICT_4X4_50",
                         choices=list(ARUCO_DICT_MAP.keys()))
-    parser.add_argument("--output", type=str, default="handeye/handeye_calibration.yaml")
+    parser.add_argument("--output", type=str,
+                        default=str(Path(__file__).parent / "handeye_calibration.yaml"))
+    parser.add_argument("--load-poses", type=str, default=None,
+                        help="Load saved joint poses, replay them on robot, recapture markers, and recalibrate")
+    parser.add_argument("--settle-time", type=float, default=2.0,
+                        help="Seconds to wait after moving to each pose before capturing (default: 2.0)")
     args = parser.parse_args()
+    
+    output_path = args.output
+    poses_data_path = str(Path(output_path).parent / "captured_poses.yaml")
+    
+    # =========================================================================
+    # Replay-poses mode: move robot → capture fresh markers → recalibrate
+    # =========================================================================
+    if args.load_poses:
+        print("=" * 60)
+        print("  Replay Poses & Recalibrate Mode")
+        print("=" * 60)
+        
+        # Load saved joint angles
+        with open(args.load_poses) as f:
+            saved_data = yaml.safe_load(f)
+        
+        saved_poses = saved_data['poses']
+        marker_id = saved_data.get('marker_id', args.marker_id)
+        marker_size = saved_data.get('marker_size', args.marker_size)
+        
+        # Filter out poses without joint angles
+        valid_poses = [p for p in saved_poses if p.get('joint_angles') is not None]
+        print(f"  Loaded {len(valid_poses)} joint poses from: {args.load_poses}")
+        if len(valid_poses) < 10:
+            print(f"  Error: Need at least 10 poses with joint_angles, have {len(valid_poses)}")
+            return 1
+        
+        # Initialize robot
+        print("\n[1/4] Initializing A1X control system...")
+        a1x_control.initialize(enable_ee_pose=True)
+        controller = a1x_control.JointController()
+        if not controller.wait_for_ee_pose(timeout=15):
+            logger.error("Failed to get EE pose. Exiting.")
+            return 1
+        print("       ✓ EE pose available")
+        
+        # Start camera
+        print("[2/4] Starting camera...")
+        camera = CameraThread(marker_id, marker_size, args.dict_type)
+        if not camera.start():
+            return 1
+        
+        # Wait for camera warm-up
+        time.sleep(1.0)
+        
+        # Initialize calibrator
+        print("[3/4] Initializing calibrator...")
+        calibrator = HandEyeCalibrator(marker_id, marker_size)
+        
+        # Replay each pose
+        print(f"[4/4] Replaying {len(valid_poses)} poses...\n")
+        
+        try:
+            for i, pose_data in enumerate(valid_poses):
+                joint_angles = pose_data['joint_angles']
+                print(f"  [{i+1}/{len(valid_poses)}] Moving to joint pose: "
+                      f"[{', '.join(f'{a:.3f}' for a in joint_angles)}]")
+                
+                # Move robot to saved joint angles
+                success = controller.move_to_position_smooth(
+                    joint_angles, steps=30, rate_hz=10.0
+                )
+                if not success:
+                    print(f"    ⚠ Failed to move to pose {i+1}, skipping")
+                    continue
+                
+                # Wait for robot to stabilize
+                time.sleep(args.settle_time)
+                
+                # Capture fresh marker detection
+                # Try multiple times in case of transient detection failures
+                detected = False
+                for attempt in range(10):
+                    frame, rvec, tvec, marker_detected = camera.get_state()
+                    if marker_detected and rvec is not None:
+                        detected = True
+                        break
+                    time.sleep(0.2)
+                
+                if not detected:
+                    print(f"    ⚠ Marker not detected at pose {i+1}, skipping")
+                    continue
+                
+                # Get fresh EE pose
+                ee_pose = controller.get_ee_pose()
+                if ee_pose is None:
+                    print(f"    ⚠ No EE pose at pose {i+1}, skipping")
+                    continue
+                
+                # Add to calibrator
+                n = calibrator.add_pose_pair(ee_pose, rvec, tvec, joint_angles=joint_angles)
+                print(f"    ✓ Captured (marker tvec: [{tvec[0]:.4f}, {tvec[1]:.4f}, {tvec[2]:.4f}]) "
+                      f"[{n} total]")
+            
+            print(f"\n  Successfully captured {calibrator.num_poses}/{len(valid_poses)} poses")
+            
+            if calibrator.num_poses < 10:
+                print(f"  Error: Only {calibrator.num_poses} valid poses, need at least 10")
+                camera.stop()
+                return 1
+            
+            # Save captured poses (with fresh marker data)
+            calibrator.save_captured_poses(poses_data_path)
+            print(f"  Captured poses saved to: {poses_data_path}")
+            
+            # Calibrate
+            print("\n  Computing calibration...")
+            result = calibrator.calibrate()
+            if result:
+                R, t = result
+                calibrator.save(R, t, output_path)
+                print(f"\n✓ Calibration saved to: {output_path}")
+                print(f"  Translation: {t.flatten()}")
+                print(f"  Rotation:\n{R}")
+            else:
+                print("  Calibration failed!")
+                camera.stop()
+                return 1
+            
+        except KeyboardInterrupt:
+            print("\n\nInterrupted by user")
+        finally:
+            camera.stop()
+        
+        return 0
     
     print("=" * 60)
     print("A1X Hand-Eye Calibration with Viser IK Control")
@@ -481,11 +665,6 @@ def main():
     print("  5. Click 'Compute Calibration'")
     print()
     
-    # =========================================================================
-    # Main loop
-    # =========================================================================
-    output_path = args.output
-    
     # Create OpenCV window for camera feed
     cv2.namedWindow("Camera - Hand-Eye Calibration", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Camera - Hand-Eye Calibration", 960, 540)
@@ -516,10 +695,17 @@ def main():
                 capture_requested[0] = False
                 if marker_detected:
                     ee_pose = controller.get_ee_pose()
+                    joint_states = controller.get_joint_states()
                     if ee_pose:
-                        n = calibrator.add_pose_pair(ee_pose, rvec, tvec)
+                        # Extract current joint angles for saving
+                        joint_angles = None
+                        if joint_states:
+                            joint_angles = [joint_states.get(f'arm_joint{i+1}', 0.0) for i in range(6)]
+                        n = calibrator.add_pose_pair(ee_pose, rvec, tvec, joint_angles=joint_angles)
+                        # Auto-save captured poses after every capture
+                        calibrator.save_captured_poses(poses_data_path)
                         status_display.value = f"Captured pose {n}"
-                        print(f"✓ Captured pose {n}")
+                        print(f"✓ Captured pose {n} (saved to {poses_data_path})")
                     else:
                         status_display.value = "Error: No EE pose"
                 else:
