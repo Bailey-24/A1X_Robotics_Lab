@@ -1,0 +1,84 @@
+# =============================================================================
+# YOLOe Vertical Grasp — Configuration
+# =============================================================================
+
+# Observation pose — joint angles [rad] for the 6 arm joints.
+# The arm looks down at the workspace from this pose.
+observation_pose: [0.0, 1.0, -0.93, 0.83, 0.0, 0.0]
+
+# Placement pose — joint angles [rad]. After lifting the object the arm
+# moves here and opens the gripper. Set to the same as observation_pose
+# by default; change to a different pose for a distinct drop location.
+place_pose: [0.75, 1.0, -0.93, 0.83, 0.0, 0.0]
+
+# ── Camera ──────────────────────────────────────────────────────────────────
+camera:
+  width: 640
+  height: 480
+  fps: 15
+  # Depth scale: raw_depth * depth_scale = meters.
+  # D405 depth_scale ≈ 0.0001 → factor_depth = 10000
+  factor_depth: 10000
+  # Show a live preview window before capturing.
+  # Press 'c' to capture, 'q' to quit without capturing.
+  live_preview: true
+
+# ── YOLOe ───────────────────────────────────────────────────────────────────
+yoloe:
+  # Path to YOLOe checkpoint (relative to project root)
+  checkpoint: "refence_code/yoloe/yoloe-v8l-seg.pt"
+  # Default target object names (text prompts).
+  # Can be overridden with --target-name on the CLI.
+  target_names: "cube" # remote
+  device: "cuda:0"
+  conf_threshold: 0.2
+  # Height offset above the detected surface (meters).
+  # For flat objects on a table, set to roughly half the object height
+  # so the gripper fingers don't collide with the table.
+  grasp_height_offset: 0.015
+  # Lateral correction in base Y [meters]. Negative = shift left.
+  # Tune empirically if gripper lands off-center.
+  grasp_y_correction: -0.015
+  # Use PCA to rotate the gripper so it closes across the narrow axis
+  # of rectangular objects. Disable to revert to the fixed top-down grip.
+  enable_pca_rotation: true
+  # Depth strategy for computing grasp Z:
+  #   "surface"    — use the median depth (top of the object).
+  #   "mid_height" — estimate object height from depth spread and
+  #                  target a fraction of the way down (more universal).
+  depth_strategy: mid_height
+  # Fraction of estimated object height at which to grasp (0=top, 1=bottom).
+  # Only used when depth_strategy is "mid_height". 0.5 = grasp at mid-height.
+  grasp_height_fraction: 0.5
+
+# ── Hand-eye calibration ────────────────────────────────────────────────────
+handeye:
+  calibration_path: "examples/handeye/handeye_calibration.yaml"
+
+# ── TCP offset (gripper_link → finger contact point) ────────────────────────
+# Distance from gripper_link origin to the fingertip contact center,
+# along the gripper approach axis (+X of gripper_link).
+# URDF: gripper_finger_joint1 at x=0.037 + finger half-length ~0.018 ≈ 0.055m
+tcp_offset: 0.075
+
+# ── Motion ──────────────────────────────────────────────────────────────────
+motion:
+  # Pre-grasp offset along approach direction [meters]
+  pre_grasp_offset: 0.05
+  # Post-grasp lift height [meters]
+  post_grasp_lift: 0.10
+  # Interpolation steps for smooth motion
+  smooth_steps: 30
+  # Joint-command publish rate [Hz]
+  control_rate_hz: 10.0
+  # Time to wait after gripper close command [seconds]
+  gripper_close_delay: 2.5
+
+# ── Safety ──────────────────────────────────────────────────────────────────
+safety:
+  # Prompt before each motion phase (pre-grasp, grasp, lift, place)
+  confirm_each_phase: false
+  # Joint position limits [rad] — must match URDF!
+  joint_limits:
+    min: [-2.8798, 0.0, -3.3161, -1.5708, -1.5708, -2.8798]
+    max: [2.8798, 3.1416, 0.0, 1.5708, 1.5708, 2.8798]
