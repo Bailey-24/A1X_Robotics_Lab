@@ -35,8 +35,8 @@ A1X SDK is a Python-based robotic arm control interface for the A1X manipulator.
 
 ### Root Project (a1x_control)
 ```bash
-python3 examples/joint_control_once.py    # Run examples directly
-python3 examples/gripper_control.py
+python3 examples/motion/joint_control_once.py    # Run examples directly
+python3 examples/motion/gripper_control.py
 ```
 
 ### pyroki Subproject

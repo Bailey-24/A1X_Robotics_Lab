@@ -1,6 +1,11 @@
 pyroki/
 librealsense/
-install/
+# install/
 .history/
 __pycache__/
 *.pyc
+
+useless_file/
+
+*.pt
+*.ts

@@ -17,9 +17,9 @@ If you encounter the error "RTNETLINK answers: Device or resource busy", it usua
 ```bash
 conda activate a1x_ros
 cd example
-python joint_control_once.py
-python joint_control_smooth.py
-python gripper_control.py
+python motion/joint_control_once.py
+python motion/joint_control_smooth.py
+python motion/gripper_control.py
 python ik_control_viser.py
 ```
 
