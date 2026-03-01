@@ -205,7 +205,7 @@ class A1XSystemManager:
             logger.error(f"Failed to launch mobiman stack: {e}")
             return False
     
-    def launch_gripper_controller(self, use_smooth_config: bool = True) -> bool:
+    def launch_gripper_controller(self, use_smooth_config: bool = False) -> bool:
         """Launch the gripper controller"""
         try:
             logger.info("Launching gripper controller...")
