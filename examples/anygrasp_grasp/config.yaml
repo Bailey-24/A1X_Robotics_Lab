@@ -1,0 +1,106 @@
+# =============================================================================
+# AnyGrasp Grasp Execution — Configuration
+# =============================================================================
+
+# Observation pose — joint angles [rad] for the 6 arm joints.
+# The arm looks down at the workspace from this pose.
+observation_pose: [0.0, 1.0, -0.93, 0.83, 0.0, 0.0]
+
+# Placement pose — joint angles [rad]. After lifting the object the arm
+# moves here and opens the gripper. Set to the same as observation_pose
+# by default; change to a different pose for a distinct drop location.
+place_pose: [0.75, 1.0, -0.93, 0.83, 0.0, 0.0]
+
+# ── Camera ──────────────────────────────────────────────────────────────────
+camera:
+  width: 640
+  height: 480
+  fps: 15
+  # Depth scale: raw_depth * (1 / factor_depth) = meters.
+  # D405 depth_scale ≈ 0.0001 → factor_depth = 10000
+  factor_depth: 10000
+  # Show a live preview window before capturing.
+  # Press 'c' to capture, 'q' to quit without capturing.
+  live_preview: true
+
+# ── YOLOe (optional target-object filtering) ────────────────────────────────
+# When a target_name is provided (via config or --target-name), YOLOe segments
+# the object and AnyGrasp runs only on that object's point cloud.
+yoloe:
+  # Path to YOLOe checkpoint (relative to project root)
+  checkpoint: "refence_code/yoloe/yoloe-v8l-seg.pt"
+  # Default target object name (text prompt). Leave empty to skip filtering.
+  # Can be overridden with --target-name on the CLI.
+  target_name: ""
+  device: "cuda:0"
+  conf_threshold: 0.2
+
+# ── AnyGrasp ────────────────────────────────────────────────────────────────
+anygrasp:
+  # Path to AnyGrasp SDK grasp_detection directory (relative to project root)
+  sdk_path: "refence_code/anygrasp_sdk/grasp_detection"
+  # Path to model checkpoint (relative to sdk_path)
+  checkpoint: "log/checkpoint_detection.tar"
+  # Output top-down grasps only
+  top_down_grasp: true
+  # Maximum gripper width in meters (<=0.1)
+  max_gripper_width: 0.1
+  # Gripper height in meters
+  gripper_height: 0.03
+  # Use AnyGrasp's predicted 6-DOF rotation for the grasp orientation.
+  # When false, overrides with a vertical top-down approach rotation
+  # (safer for simple tabletop picks; uses only AnyGrasp's position).
+  use_anygrasp_rotation: true
+  # Safety margin added to AnyGrasp's predicted gripper width [meters].
+  # The gripper opens to (predicted_width + margin) before descending.
+  gripper_width_margin: 0.02
+
+# ── Workspace Limits ────────────────────────────────────────────────────────
+# Filter output grasps to this bounding box [meters, in camera frame].
+# Tune these values to match your robot's reachable workspace.
+workspace:
+  xmin: -0.30
+  xmax: 0.30
+  ymin: -0.10
+  ymax: 0.30
+  zmin: 0.0
+  zmax: 1.0
+
+# ── Visualization ───────────────────────────────────────────────────────────
+visualization:
+  # Number of top grasps to display for selection
+  top_n: 20
+
+# ── Hand-eye calibration ────────────────────────────────────────────────────
+handeye:
+  calibration_path: "examples/handeye/handeye_calibration.yaml"
+
+# ── TCP offset (gripper_link → finger contact point) ────────────────────────
+# Distance from gripper_link origin to the fingertip contact center,
+# along the gripper approach axis (+X of gripper_link).
+# URDF: gripper_finger_joint1 at x=0.037 + finger half-length ~0.018 ≈ 0.055m
+tcp_offset: 0.075
+
+# ── Motion ──────────────────────────────────────────────────────────────────
+motion:
+  # Pre-grasp offset along approach direction [meters]
+  pre_grasp_offset: 0.05
+  # Post-grasp lift height [meters]
+  post_grasp_lift: 0.10
+  # Interpolation steps for smooth motion
+  smooth_steps: 30
+  # Joint-command publish rate [Hz]
+  control_rate_hz: 20.0
+  # Interpolation type for trajectory
+  interpolation_type: cosine
+  # Time to wait after gripper close command [seconds]
+  gripper_close_delay: 2.5
+
+# ── Safety ──────────────────────────────────────────────────────────────────
+safety:
+  # Prompt before each motion phase (pre-grasp, grasp, lift, place)
+  confirm_each_phase: false
+  # Joint position limits [rad] — must match URDF!
+  joint_limits:
+    min: [-2.8798, 0.0, -3.3161, -1.5708, -1.5708, -2.8798]
+    max: [2.8798, 3.1416, 0.0, 1.5708, 1.5708, 2.8798]
