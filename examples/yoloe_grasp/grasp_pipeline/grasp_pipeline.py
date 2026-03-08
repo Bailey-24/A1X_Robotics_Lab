@@ -87,7 +87,11 @@ def step_1_move_to_observation(controller, observation_pose: list, dry_run: bool
     # Move to observation pose
     print("  Moving to observation pose...")
     success = controller.move_to_position_smooth(
-        observation_pose, steps=30, rate_hz=10.0
+        observation_pose, 
+        steps=30, 
+        rate_hz=20.0,
+        interpolation_type="cosine",
+        wait_for_convergence=True
     )
     if not success:
         raise RuntimeError("Failed to move to observation pose")
@@ -414,6 +418,7 @@ def step_5_execute_grasp(
         control_rate_hz=motion_cfg.get("control_rate_hz", 10.0),
         joint_limits_min=safety_cfg.get("joint_limits", {}).get("min"),
         joint_limits_max=safety_cfg.get("joint_limits", {}).get("max"),
+        interpolation_type=motion_cfg.get("interpolation_type", "linear"),
     )
 
     # Get current joint state as IK seed

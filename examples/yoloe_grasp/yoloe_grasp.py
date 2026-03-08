@@ -77,6 +77,8 @@ def move_to_joint_pose(
     target_joints: list[float],
     label: str = "target",
     dry_run: bool = False,
+    rate_hz: float = 20.0,
+    interpolation_type: str = "cosine",
 ) -> None:
     """Move robot to a joint-angle pose with smooth interpolation."""
     print(f"\n  Moving to {label} pose: {target_joints}")
@@ -84,7 +86,13 @@ def move_to_joint_pose(
         print("  [DRY RUN] Skipping motion")
         return
 
-    success = controller.move_to_position_smooth(target_joints, steps=60, rate_hz=10.0)
+    success = controller.move_to_position_smooth(
+        target_joints, 
+        steps=60, 
+        rate_hz=rate_hz,
+        interpolation_type=interpolation_type,
+        wait_for_convergence=True
+    )
     if success:
         print(f"  ✓ Smooth motion complete")
         time.sleep(0.5)  # brief settle
@@ -484,6 +492,7 @@ def step_7_execute_grasp(
         control_rate_hz=motion_cfg.get("control_rate_hz", 10.0),
         joint_limits_min=safety_cfg.get("joint_limits", {}).get("min"),
         joint_limits_max=safety_cfg.get("joint_limits", {}).get("max"),
+        interpolation_type=motion_cfg.get("interpolation_type", "linear"),
     )
 
     # Get current joints as IK seed (6 arm joints only)

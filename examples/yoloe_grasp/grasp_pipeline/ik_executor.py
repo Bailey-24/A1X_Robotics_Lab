@@ -32,6 +32,7 @@ class IKExecutor:
         control_rate_hz: float = 10.0,
         joint_limits_min: Optional[List[float]] = None,
         joint_limits_max: Optional[List[float]] = None,
+        interpolation_type: str = 'linear',
     ):
         """Initialize the IK executor.
 
@@ -40,9 +41,11 @@ class IKExecutor:
             control_rate_hz: Control loop rate in Hz.
             joint_limits_min: Minimum joint limits in radians (6 joints).
             joint_limits_max: Maximum joint limits in radians (6 joints).
+            interpolation_type: 'linear' or 'cosine' for trajectory generation.
         """
         self.smooth_steps = smooth_steps
         self.control_rate_hz = control_rate_hz
+        self.interpolation_type = interpolation_type
         # Defaults match the A1X URDF exactly
         self.joint_limits_min = joint_limits_min or [-2.8798, 0.0, -3.3161, -1.5708, -1.5708, -2.8798]
         self.joint_limits_max = joint_limits_max or [ 2.8798, 3.1416, 0.0,  1.5708,  1.5708,  2.8798]
@@ -309,6 +312,8 @@ class IKExecutor:
                     arm_joints,
                     steps=self.smooth_steps * 2,  # 60 steps → slower
                     rate_hz=self.control_rate_hz,
+                    interpolation_type=self.interpolation_type,
+                    wait_for_convergence=True,
                 )
             else:
                 # Grasp: small descent from pre-grasp
@@ -316,6 +321,8 @@ class IKExecutor:
                     arm_joints,
                     steps=self.smooth_steps,
                     rate_hz=self.control_rate_hz,
+                    interpolation_type=self.interpolation_type,
+                    wait_for_convergence=True,
                 )
             if not success:
                 logger.error(f"  Motion failed for {phase_name}")
@@ -367,6 +374,8 @@ class IKExecutor:
                 arm_joints_lift,
                 steps=self.smooth_steps * 2,  # slower lift
                 rate_hz=self.control_rate_hz,
+                interpolation_type=self.interpolation_type,
+                wait_for_convergence=False, # no need to strictly check convergence at the end of lift
             )
             if not success:
                 logger.error("  Lift motion failed")

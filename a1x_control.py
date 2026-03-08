@@ -19,6 +19,7 @@ Usage:
 import os
 import sys
 import time
+import math
 import subprocess
 import threading
 import signal
@@ -736,7 +737,7 @@ class JointController(Node):
         
         return self.current_joint_state is not None
     
-    def interpolate_trajectory(self, start_pos: List[float], end_pos: List[float], steps: int) -> List[List[float]]:
+    def interpolate_trajectory(self, start_pos: List[float], end_pos: List[float], steps: int, interpolation_type: str = 'linear') -> List[List[float]]:
         """
         Generate interpolated trajectory between two positions
         
@@ -744,6 +745,7 @@ class JointController(Node):
             start_pos: Starting joint positions
             end_pos: Ending joint positions
             steps: Number of interpolation steps
+            interpolation_type: 'linear' or 'cosine'
             
         Returns:
             List of interpolated joint positions
@@ -753,23 +755,29 @@ class JointController(Node):
         
         trajectory = []
         for i in range(steps + 1):
-            t = i / steps  # Interpolation parameter from 0 to 1
+            t_raw = i / steps  # Interpolation parameter from 0 to 1
+            if interpolation_type == 'cosine':
+                t = 0.5 * (1 - math.cos(math.pi * t_raw))
+            else:
+                t = t_raw
+                
             interpolated = []
             for j in range(len(start_pos)):
-                # Linear interpolation
+                # Linear interpolation using the blending parameter
                 pos = start_pos[j] + t * (end_pos[j] - start_pos[j])
                 interpolated.append(pos)
             trajectory.append(interpolated)
         
         return trajectory
     
-    def execute_trajectory(self, trajectory: List[List[float]], rate_hz: float = 10.0) -> bool:
+    def execute_trajectory(self, trajectory: List[List[float]], rate_hz: float = 10.0, debug_log: bool = False) -> bool:
         """
         Execute a trajectory at specified rate without sleep
         
         Args:
             trajectory: List of joint position waypoints
             rate_hz: Control rate in Hz
+            debug_log: If True, log commanded vs actual positions
             
         Returns:
             True if trajectory executed successfully
@@ -785,6 +793,11 @@ class JointController(Node):
                 if self._trajectory_index < len(self._trajectory):
                     positions = self._trajectory[self._trajectory_index]
                     self.set_joint_positions(positions)
+                    if debug_log:
+                        actual = self.get_joint_states()
+                        if actual:
+                            actual_list = [actual.get(name, 0.0) for name in self.joint_names]
+                            logger.info(f"Step {self._trajectory_index} | Cmd: {[f'{x:.3f}' for x in positions]} | Act: {[f'{x:.3f}' for x in actual_list]}")
                     self._trajectory_index += 1
                 else:
                     self._trajectory_complete = True
@@ -802,7 +815,10 @@ class JointController(Node):
             logger.error(f"Failed to execute trajectory: {e}")
             return False
     
-    def move_to_position_smooth(self, target_positions: List[float], steps: int = 20, rate_hz: float = 10.0) -> bool:
+    def move_to_position_smooth(self, target_positions: List[float], steps: int = 20, rate_hz: float = 10.0, 
+                                interpolation_type: str = 'linear', wait_for_convergence: bool = False,
+                                convergence_tolerance: float = 0.015, convergence_timeout: float = 2.0,
+                                debug_log: bool = False) -> bool:
         """
         Move smoothly to target position with interpolation
         
@@ -810,6 +826,11 @@ class JointController(Node):
             target_positions: Target joint positions
             steps: Number of interpolation steps
             rate_hz: Control rate in Hz
+            interpolation_type: 'linear' or 'cosine'
+            wait_for_convergence: Whether to wait for arm to settle after motion
+            convergence_tolerance: Max error in rads to consider settled
+            convergence_timeout: Timeout in seconds for convergence waiting
+            debug_log: Whether to log step-by-step positions
             
         Returns:
             True if movement completed successfully
@@ -831,10 +852,28 @@ class JointController(Node):
                     return False
             
             # Generate trajectory
-            trajectory = self.interpolate_trajectory(current_positions, target_positions, steps)
+            trajectory = self.interpolate_trajectory(current_positions, target_positions, steps, interpolation_type=interpolation_type)
             
             # Execute trajectory
-            return self.execute_trajectory(trajectory, rate_hz)
+            success = self.execute_trajectory(trajectory, rate_hz, debug_log=debug_log)
+            
+            if not success:
+                return False
+                
+            if wait_for_convergence:
+                start_time = time.time()
+                max_err = float('inf')
+                while time.time() - start_time < convergence_timeout:
+                    curr_state = self.get_joint_states()
+                    if curr_state:
+                        curr_pos = [curr_state.get(name, 0.0) for name in self.joint_names]
+                        max_err = max(abs(c - t) for c, t in zip(curr_pos, target_positions))
+                        if max_err <= convergence_tolerance:
+                            return True
+                    time.sleep(0.05)
+                logger.warning(f"Motion convergence timeout after {convergence_timeout}s. Final max error: {max_err:.4f} rad")
+                
+            return True
             
         except Exception as e:
             logger.error(f"Failed to move to position smoothly: {e}")
