@@ -874,10 +874,257 @@ class JointController(Node):
                 logger.warning(f"Motion convergence timeout after {convergence_timeout}s. Final max error: {max_err:.4f} rad")
                 
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to move to position smoothly: {e}")
             return False
+
+    # ── IK / End-Effector control ────────────────────────────────────────
+
+    _ik_robot = None       # lazy-loaded PyRoki robot
+    _ik_target_idx = None  # link index for gripper_link
+
+    def _ensure_ik(self):
+        """Lazy-load PyRoki robot and IK solver (first call only)."""
+        if type(self)._ik_robot is not None:
+            return
+
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        project_root = _Path(__file__).resolve().parent
+        pyroki_examples = str(project_root / "pyroki" / "examples")
+        if pyroki_examples not in _sys.path:
+            _sys.path.insert(0, pyroki_examples)
+
+        import pyroki as pk
+        import yourdfpy
+
+        urdf_path = project_root / "install" / "mobiman" / "lib" / "mobiman" / "configs" / "urdfs" / "a1x.urdf"
+
+        def _resolve_uri(fname: str) -> str:
+            prefix = "package://mobiman/"
+            if fname.startswith(prefix):
+                return str(project_root / "install" / "mobiman" / "share" / "mobiman" / fname[len(prefix):])
+            return fname
+
+        urdf = yourdfpy.URDF.load(str(urdf_path), filename_handler=_resolve_uri)
+        type(self)._ik_robot = pk.Robot.from_urdf(urdf)
+        type(self)._ik_target_idx = type(self)._ik_robot.links.names.index("gripper_link")
+        logger.info(f"PyRoki IK loaded ({type(self)._ik_robot.joints.num_actuated_joints} actuated joints)")
+
+    def _solve_ik(self, target_position, target_wxyz, seed_joints=None):
+        """Solve IK for a target EE pose.
+
+        Args:
+            target_position: [x, y, z] in base frame (meters).
+            target_wxyz: [w, x, y, z] orientation quaternion.
+            seed_joints: 6-element arm joint seed (uses current if None).
+
+        Returns:
+            6-element list of arm joint angles, or None on failure.
+        """
+        self._ensure_ik()
+        import numpy as np
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        pyroki_examples = str(_Path(__file__).resolve().parent / "pyroki" / "examples")
+        if pyroki_examples not in _sys.path:
+            _sys.path.insert(0, pyroki_examples)
+        import pyroki_snippets as pks
+
+        robot = type(self)._ik_robot
+        target_idx = type(self)._ik_target_idx
+
+        # Build 8-joint seed (6 arm + 2 gripper pinned to 0)
+        if seed_joints is None:
+            joints = self.get_joint_states()
+            if joints:
+                seed6 = [joints.get(n, 0.0) for n in self.joint_names]
+            else:
+                seed6 = [0.0] * 6
+        else:
+            seed6 = list(seed_joints)
+        seed8 = np.array(seed6 + [0.0, 0.0])
+
+        target_pos = np.array(target_position, dtype=float)
+        target_ori = np.array(target_wxyz, dtype=float)
+
+        # Joint limits from URDF
+        lo = np.array([-2.8798, 0.0, -3.3161, -1.5708, -1.5708, -2.8798])
+        hi = np.array([ 2.8798, 3.1416, 0.0,  1.5708,  1.5708,  2.8798])
+
+        # Multi-seed: current + observation + random
+        seeds = [seed8.copy()]
+        obs = np.array([0.0, 1.0, -0.93, 0.83, 0.0, 0.0, 0.0, 0.0])
+        seeds.append(obs)
+        for _ in range(8):
+            r = np.zeros(8)
+            r[:6] = lo + (hi - lo) * np.random.rand(6)
+            seeds.append(r)
+
+        best_sol = None
+        best_err = float("inf")
+        best_in_limits = False
+
+        for s in seeds:
+            try:
+                sol = pks.solve_ik(
+                    robot=robot,
+                    target_link_name="gripper_link",
+                    target_position=target_pos,
+                    target_wxyz=target_ori,
+                    initial_joint_config=s,
+                )
+                sol[6:] = 0.0
+                arm = sol[:6]
+                in_lim = all(lo[j] <= arm[j] <= hi[j] for j in range(6))
+
+                fk = robot.forward_kinematics(sol)
+                ee = np.array(fk[target_idx][4:7])
+                err = float(np.linalg.norm(ee - target_pos))
+
+                if (in_lim and (not best_in_limits or err < best_err)) or (not best_in_limits and err < best_err):
+                    best_sol = sol
+                    best_err = err
+                    best_in_limits = in_lim
+
+                if err < 0.005 and in_lim:
+                    break
+            except Exception:
+                continue
+
+        if best_sol is not None and best_err < 0.02:
+            logger.info(f"IK solved: error={best_err:.4f}m, joints={best_sol[:6].tolist()}")
+            return list(best_sol[:6].astype(float))
+
+        logger.error(f"IK failed (best error={best_err:.4f}m)")
+        return None
+
+    def get_current_ee_from_fk(self) -> Optional[Dict[str, Any]]:
+        """Compute current EE pose via forward kinematics (no ROS topic needed).
+
+        Returns:
+            Dict with 'position' [x,y,z] and 'wxyz' [w,x,y,z], or None.
+        """
+        self._ensure_ik()
+        import numpy as np
+
+        joints = self.get_joint_states()
+        if not joints:
+            return None
+
+        cfg = np.array([joints.get(n, 0.0) for n in self.joint_names] + [0.0, 0.0])
+        robot = type(self)._ik_robot
+        target_idx = type(self)._ik_target_idx
+
+        fk = robot.forward_kinematics(cfg)
+        pose = fk[target_idx]  # [w, x, y, z, px, py, pz]
+        return {
+            'position': [float(pose[4]), float(pose[5]), float(pose[6])],
+            'wxyz': [float(pose[0]), float(pose[1]), float(pose[2]), float(pose[3])],
+        }
+
+    def move_ee_relative(
+        self,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        dz: float = 0.0,
+        steps: int = 30,
+        rate_hz: float = 10.0,
+        interpolation_type: str = 'cosine',
+        wait_for_convergence: bool = True,
+    ) -> bool:
+        """Move end-effector by a relative offset in the base frame.
+
+        Coordinate system (base frame):
+            X = forward (away from base), Y = left, Z = up.
+
+        Human-intuitive mapping:
+            forward → +dx,  backward → -dx
+            left    → +dy,  right    → -dy
+            up      → +dz,  down     → -dz
+
+        Args:
+            dx/dy/dz: Offset in meters.
+            steps/rate_hz/interpolation_type/wait_for_convergence:
+                Forwarded to move_to_position_smooth().
+
+        Returns:
+            True if motion completed successfully.
+        """
+        ee = self.get_current_ee_from_fk()
+        if ee is None:
+            logger.error("Cannot read current EE pose for relative move")
+            return False
+
+        target_pos = [
+            ee['position'][0] + dx,
+            ee['position'][1] + dy,
+            ee['position'][2] + dz,
+        ]
+        target_wxyz = ee['wxyz']  # keep current orientation
+
+        logger.info(f"EE relative move: dx={dx}, dy={dy}, dz={dz}")
+        logger.info(f"  current: {ee['position']}")
+        logger.info(f"  target:  {target_pos}")
+
+        joint_sol = self._solve_ik(target_pos, target_wxyz)
+        if joint_sol is None:
+            return False
+
+        return self.move_to_position_smooth(
+            joint_sol,
+            steps=steps,
+            rate_hz=rate_hz,
+            interpolation_type=interpolation_type,
+            wait_for_convergence=wait_for_convergence,
+        )
+
+    def move_ee_absolute(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        wxyz: Optional[List[float]] = None,
+        steps: int = 30,
+        rate_hz: float = 10.0,
+        interpolation_type: str = 'cosine',
+        wait_for_convergence: bool = True,
+    ) -> bool:
+        """Move end-effector to an absolute position in the base frame.
+
+        Args:
+            x/y/z: Target position in meters (base frame).
+            wxyz: Orientation quaternion [w,x,y,z]. If None, keeps current.
+            steps/rate_hz/interpolation_type/wait_for_convergence:
+                Forwarded to move_to_position_smooth().
+
+        Returns:
+            True if motion completed successfully.
+        """
+        if wxyz is None:
+            ee = self.get_current_ee_from_fk()
+            if ee is None:
+                logger.error("Cannot read current EE orientation")
+                return False
+            wxyz = ee['wxyz']
+
+        target_pos = [x, y, z]
+        logger.info(f"EE absolute move: target={target_pos}")
+
+        joint_sol = self._solve_ik(target_pos, wxyz)
+        if joint_sol is None:
+            return False
+
+        return self.move_to_position_smooth(
+            joint_sol,
+            steps=steps,
+            rate_hz=rate_hz,
+            interpolation_type=interpolation_type,
+            wait_for_convergence=wait_for_convergence,
+        )
 
 
 # Global system manager instance
