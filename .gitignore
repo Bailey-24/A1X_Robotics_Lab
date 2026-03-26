@@ -11,3 +11,5 @@ useless_file/
 *.ts
 
 examples/camera/captured_frames/
+
+*.jpg
