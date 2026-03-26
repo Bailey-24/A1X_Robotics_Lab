@@ -68,7 +68,89 @@ Scripts for receiving and processing streaming ARKit pose data from an iPhone fo
 
 ---
 
-## 🏗️ SDK Architecture 
+## 🤖 Skills (LLM-Powered Control)
+
+The `skills/` directory contains LLM-powered interactive control systems. All skills require API keys set as environment variables (add to `~/.zshrc`):
+
+```bash
+# LLM codegen proxy (motchat.com)
+export A1X_API_KEY="your-key-here"
+# Cloud VLM for scene understanding (chatanywhere.tech)
+export A1X_VLM_API_KEY="your-key-here"
+```
+
+### 1. `skills/a1x-arm-codegen/` (Natural Language Arm Control)
+
+Use natural language (Chinese or English) to control the robotic arm. An LLM translates your text into Python control scripts and executes them on the real robot. Supports joint control, end-effector (Cartesian) control, and gripper commands.
+
+```bash
+# Interactive mode
+python skills/a1x-arm-codegen/scripts/a1x_text_codegen.py
+
+# Auto-execute mode (skip confirmation)
+python skills/a1x-arm-codegen/scripts/a1x_text_codegen.py --execute
+```
+
+Example commands:
+```
+[You] > 去观测位置
+[You] > 向前移动2厘米
+[You] > move to observation, then move forward 2cm and up 3cm
+```
+
+Direction reference: `+X=forward`, `-X=backward`, `+Y=left`, `-Y=right`, `+Z=up`, `-Z=down`.
+
+Also available at `examples/llm/a1x_text_codegen.py` — see its [README](examples/llm/README.md) for detailed usage.
+
+### 2. `skills/a1x-grab-skill/` (Intelligent Grasping)
+
+Code-as-Policies grasping orchestrator. Combines VLM scene understanding (Qwen), SAM3 object detection, and LLM code generation for flexible pick-and-place tasks.
+
+```bash
+# Interactive mode
+python skills/a1x-grab-skill/scripts/a1x_grab.py
+
+# Auto-execute mode
+python skills/a1x-grab-skill/scripts/a1x_grab.py --execute
+
+# Single-shot mode
+python skills/a1x-grab-skill/scripts/a1x_grab.py "grab the yellow cube"
+```
+
+Example commands:
+```
+[You] > 桌面上有什么物体？         # Ask questions — LLM answers in text
+[You] > 帮我抓取所有黄色物体        # Action commands — LLM generates & runs code
+[You] > grab the red cup and place it 3cm to the right
+```
+
+Features:
+- **Question answering**: asks about the scene, LLM replies naturally (no code)
+- **Smart grasping**: pick, place, and custom placement with EE control
+- **Multi-object loops**: uses `detect()` between picks to adapt to scene changes
+- **SAM3 prompt retry**: auto-simplifies prompts if detection fails (e.g. "yellow rectangular note" → "note")
+- **Code logging**: all generated code saved to `logs/generate_code/` with timestamps
+
+Interactive commands: `scene` (re-capture), `history`, `clear`, `quit`.
+
+### 3. `skills/a1x-realsense-vision/` (Camera Scene Description)
+
+Capture an image from the RealSense D405 camera and analyze it with a VLM (local Ollama or cloud Qwen).
+
+```bash
+# Local Ollama model
+python skills/a1x-realsense-vision/scripts/a1x_vision.py "桌上有什么物体"
+
+# Cloud VLM (qwen3.5-plus)
+python skills/a1x-realsense-vision/scripts/a1x_vision.py --model cloud "describe the scene"
+
+# Save captured image
+python skills/a1x-realsense-vision/scripts/a1x_vision.py --save /tmp/snap.jpg "what's on the desk?"
+```
+
+---
+
+## 🏗️ SDK Architecture
 
 - `a1x_control.py` - Core object-oriented Python API wrapping ROS 2 Topics (`JointController`). Handles reliable, verified message passing so users don't need to write ROS code.
 - `pyroki/` - Python Robot Kinematics. A standalone, JAX-based fast IK/FK solver sub-project used by advanced workflows like `yoloe_grasp`.
