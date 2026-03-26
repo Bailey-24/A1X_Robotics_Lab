@@ -42,10 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger("a1x_grab")
 
 # ── Codegen LLM config ───────────────────────────────────────────────────────
-_CLAUDE_API_KEY = os.environ.get(
-    "A1X_API_KEY",
-    "sk-Uo0NVlWQJvXdnKiEyrhD0O9OQDPxyae9pLIXF2DcgQiUk8RO",
-)
+_CLAUDE_API_KEY = os.environ.get("A1X_API_KEY", "")
 _CLAUDE_BASE_URL = "https://new.motchat.com"
 _CODEGEN_MODEL = "claude-opus-4-6"
 

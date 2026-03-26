@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -49,7 +50,7 @@ from examples.yoloe_grasp.yoloe_grasp import (
 logger = logging.getLogger("robot_api")
 
 # ── Cloud VLM config ─────────────────────────────────────────────────────────
-_CLOUD_API_KEY = "sk-f65AH7RNdd6s3frMPoE96p6nIDLeDz0LsaaEzuBDwELxVP4d"
+_CLOUD_API_KEY = os.environ.get("A1X_VLM_API_KEY", "")
 _CLOUD_BASE_URL = "https://api.chatanywhere.tech/v1"
 _CLOUD_MODEL = "qwen3.5-plus"
 

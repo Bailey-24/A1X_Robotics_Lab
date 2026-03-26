@@ -32,7 +32,7 @@ logger = logging.getLogger("a1x_vision")
 # ---------------------------------------------------------------------------
 # API config (for cloud backend)
 # ---------------------------------------------------------------------------
-CLOUD_API_KEY = "sk-f65AH7RNdd6s3frMPoE96p6nIDLeDz0LsaaEzuBDwELxVP4d"
+CLOUD_API_KEY = os.environ.get("A1X_VLM_API_KEY", "")
 CLOUD_BASE_URL = "https://api.chatanywhere.tech/v1"
 
 DEFAULT_OLLAMA_MODEL = "qwen3.5:9b"
