@@ -438,8 +438,17 @@ def step_6_transform_to_base(
     # Project onto horizontal (base XY) plane and extract angle
     theta_grasp = np.arctan2(pca_dir_base[1], pca_dir_base[0])
 
+    # ── Resolve 180° ambiguity ───────────────────────────────────────────
+    # The gripper is symmetric: grasping at θ and θ+180° are equivalent.
+    # Normalize to (-π/2, π/2] so the gripper chooses the smaller rotation
+    # from its default forward-facing orientation (θ=0).
+    if theta_grasp > np.pi / 2:
+        theta_grasp -= np.pi
+    elif theta_grasp <= -np.pi / 2:
+        theta_grasp += np.pi
+
     print(f"  PCA angle (image space): {np.degrees(grasp_angle):.1f}°")
-    print(f"  Grasp angle (base frame): {np.degrees(theta_grasp):.1f}°")
+    print(f"  Grasp angle (base frame): {np.degrees(theta_grasp):.1f}°  (180° ambiguity resolved)")
 
     # Rotate around the vertical (base Z-axis) to orient the gripper in
     # the horizontal plane.  Must be R_z @ R_topdown (base-frame rotation
