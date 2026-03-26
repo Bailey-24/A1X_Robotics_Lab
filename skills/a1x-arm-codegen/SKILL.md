@@ -45,7 +45,10 @@ Use these predefined positions when the user refers to them:
 
 ### 4. Motion Commands
 
-- **Default behavior**: Unless the user explicitly specifies a starting position, always move to the **observation position** first before performing any EE (Cartesian) movements such as "move forward", "move up", etc. This ensures the arm starts from a known, safe pose. Skip this if the user says "from current position" or names a different starting position.
+- **Default behavior**:
+  - **First command in the session** (no prior conversation history): Always move to the **observation position** first before performing any EE (Cartesian) movements. This ensures the arm starts from a known, safe pose.
+  - **Subsequent commands in the same session** (prior conversation history exists): Do **NOT** go to observation position. Assume the arm is already at the position left by the previous command and continue from there directly.
+  - Always skip the observation position step if the user says "from current position" or explicitly names a different starting position.
 - **Prefer `move_to_position_smooth()`** for all joint-space movements. It interpolates from the current position to the target, producing safe, smooth motion.
 - Use `interpolation_type='cosine'` for acceleration/deceleration (ease in/out). Use `'linear'` for constant-speed motion.
 - Use `steps=20, rate_hz=10.0` as defaults. Increase steps for longer movements.

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""YOLOe Vertical Grasp — End-to-End Pick-and-Place for A1X.
+"""YOLOe / SAM3 Vertical Grasp — End-to-End Pick-and-Place for A1X.
 
 Orchestrates the complete pipeline:
     1. Move to observation pose
     2. Capture RGBD from D405
-    3. Detect target object with YOLOe (text-prompt segmentation)
+    3. Detect target object with YOLOe or SAM3 (text-prompt segmentation)
     4. Compute top-down grasp from mask + depth
     5. Transform grasp to robot base frame via hand-eye calibration
     6. Solve IK and execute grasp motion (pre-grasp → grasp → lift → place)
@@ -12,13 +12,15 @@ Orchestrates the complete pipeline:
 Usage:
     python examples/yoloe_grasp/yoloe_grasp.py
     python examples/yoloe_grasp/yoloe_grasp.py --target-name cup
+    python examples/yoloe_grasp/yoloe_grasp.py --detector sam3 --target-name banana
     python examples/yoloe_grasp/yoloe_grasp.py --dry-run --visualize
 
 Prerequisites:
     - CAN bus configured (1 Mbps / 5 Mbps FD)
     - ROS 2 environment sourced (or using a1x_control auto-launch)
     - Hand-eye calibration completed (handeye_calibration.yaml)
-    - YOLOe checkpoint downloaded
+    - YOLOe checkpoint downloaded  (for --detector yoloe, default)
+    - SAM3 installed               (for --detector sam3)
 """
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # ── Reuse existing grasp_pipeline modules ───────────────────────────────────
 from examples.yoloe_grasp.grasp_pipeline.yoloe_detector import YOLOeDetector
+from examples.yoloe_grasp.grasp_pipeline.sam3_detector import Sam3Detector
 from examples.yoloe_grasp.grasp_pipeline.depth_grasp import compute_grasp_from_detection
 from examples.yoloe_grasp.grasp_pipeline.coordinate_transform import (
     load_handeye_calibration,
@@ -255,17 +258,20 @@ def step_4_detect_object(
     yoloe_cfg: dict,
     target_name_override: str | None = None,
     visualize: bool = False,
+    detector_type: str = "yoloe",
 ):
-    """Step 4: Detect target object with YOLOe text-prompt segmentation.
+    """Step 4: Detect target object via text-prompt segmentation.
+
+    Args:
+        detector_type: 'yoloe' (default) or 'sam3'.
 
     Returns:
         Tuple of (bbox_xyxy, mask, score, class_name).
     """
     print("\n" + "=" * 60)
-    print("STEP 4: Detect Object (YOLOe)")
+    print(f"STEP 4: Detect Object ({detector_type.upper()})")
     print("=" * 60)
 
-    checkpoint = str(PROJECT_ROOT / yoloe_cfg["checkpoint"])
     device = yoloe_cfg.get("device", "cuda:0")
     target_names = target_name_override or yoloe_cfg.get("target_names", "box")
     conf_threshold = yoloe_cfg.get("conf_threshold", 0.25)
@@ -274,12 +280,17 @@ def step_4_detect_object(
     if isinstance(target_names, str):
         target_names = [target_names]
 
-    print(f"  Checkpoint: {checkpoint}")
     print(f"  Targets: {target_names}")
     print(f"  Device: {device}")
 
-    detector = YOLOeDetector(checkpoint, device=device)
-    result = detector.detect(color, target_names, conf_threshold=conf_threshold)
+    if detector_type == "sam3":
+        detector = Sam3Detector(device=device)
+        result = detector.detect(color, target_names, conf_threshold=0.0)
+    else:
+        checkpoint = str(PROJECT_ROOT / yoloe_cfg["checkpoint"])
+        print(f"  Checkpoint: {checkpoint}")
+        detector = YOLOeDetector(checkpoint, device=device)
+        result = detector.detect(color, target_names, conf_threshold=conf_threshold)
 
     if result is None:
         print("  ✗ No object detected!")
@@ -579,6 +590,12 @@ def parse_args():
         help="Path to config.yaml (default: same directory as this script)",
     )
     parser.add_argument(
+        "--detector",
+        choices=["yoloe", "sam3"],
+        default="yoloe",
+        help="Detector backend: 'yoloe' (default) or 'sam3'",
+    )
+    parser.add_argument(
         "--target-name",
         type=str,
         default=None,
@@ -633,6 +650,7 @@ def main():
         color, yoloe_cfg,
         target_name_override=args.target_name,
         visualize=args.visualize,
+        detector_type=args.detector,
     )
 
     if detection is None:
