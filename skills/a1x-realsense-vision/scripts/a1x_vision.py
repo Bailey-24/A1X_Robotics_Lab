@@ -3,9 +3,8 @@
 A1X RealSense Vision — Capture image from D405 and analyze with VLM.
 
 Usage:
-    python a1x_vision.py                              # ollama, default prompt
-    python a1x_vision.py "桌上有什么物体"              # ollama, custom prompt
-    python a1x_vision.py --model cloud "描述场景"      # qwen3.5-plus via chatanywhere
+    python a1x_vision.py                              # default prompt
+    python a1x_vision.py "桌上有什么物体"              # custom prompt
     python a1x_vision.py --save /tmp/snap.jpg "..."   # save captured image
 """
 from __future__ import annotations
@@ -35,7 +34,6 @@ logger = logging.getLogger("a1x_vision")
 CLOUD_API_KEY = os.environ.get("A1X_VLM_API_KEY", "")
 CLOUD_BASE_URL = "https://api.chatanywhere.tech/v1"
 
-DEFAULT_OLLAMA_MODEL = "qwen3.5:9b"
 DEFAULT_CLOUD_MODEL = "qwen3.5-plus"
 DEFAULT_PROMPT = "图像中有什么？请详细描述场景和物体。"
 
@@ -96,22 +94,6 @@ def image_to_base64(image: np.ndarray, quality: int = 90) -> str:
 # VLM backends
 # ---------------------------------------------------------------------------
 
-def analyze_with_ollama(b64: str, prompt: str, model: str) -> str:
-    """Call local Ollama vision model."""
-    from ollama import chat  # type: ignore
-    response = chat(
-        model=model,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt,
-                "images": [b64],
-            }
-        ],
-    )
-    return response.message.content
-
-
 def analyze_with_cloud(b64: str, prompt: str, model: str) -> str:
     """Call cloud VLM (qwen3.5-plus) via chatanywhere OpenAI-compatible API."""
     client = OpenAI(api_key=CLOUD_API_KEY, base_url=CLOUD_BASE_URL)
@@ -148,17 +130,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        choices=["ollama", "cloud"],
-        default="cloud",
-        help="VLM backend to use (default: cloud)",
-    )
-    parser.add_argument(
-        "--ollama-model",
-        default=DEFAULT_OLLAMA_MODEL,
-        help=f"Ollama model name (default: {DEFAULT_OLLAMA_MODEL})",
-    )
-    parser.add_argument(
-        "--cloud-model",
         default=DEFAULT_CLOUD_MODEL,
         help=f"Cloud model name (default: {DEFAULT_CLOUD_MODEL})",
     )
@@ -176,7 +147,7 @@ def main() -> None:
     fps = cam.get("fps", 15)
 
     print(f"[Camera] RealSense D405 — {width}x{height} @ {fps}fps")
-    print(f"[Model ] {args.model} / {args.ollama_model if args.model == 'ollama' else args.cloud_model}")
+    print(f"[Model ] {args.model}")
     print(f"[Prompt] {args.prompt}")
     print()
 
@@ -193,10 +164,7 @@ def main() -> None:
     # Analyze
     print("Analyzing image...")
     try:
-        if args.model == "ollama":
-            result = analyze_with_ollama(b64, args.prompt, args.ollama_model)
-        else:
-            result = analyze_with_cloud(b64, args.prompt, args.cloud_model)
+        result = analyze_with_cloud(b64, args.prompt, args.model)
     except Exception as e:
         logger.error("Analysis failed: %s", e)
         sys.exit(1)

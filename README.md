@@ -135,14 +135,14 @@ Interactive commands: `scene` (re-capture), `history`, `clear`, `quit`.
 
 ### 3. `skills/a1x-realsense-vision/` (Camera Scene Description)
 
-Capture an image from the RealSense D405 camera and analyze it with a VLM (local Ollama or cloud Qwen).
+Capture an image from the RealSense D405 camera and analyze it with qwen3.5-plus (cloud VLM via `A1X_VLM_API_KEY`).
 
 ```bash
-# Local Ollama model
-python skills/a1x-realsense-vision/scripts/a1x_vision.py "桌上有什么物体"
+# Default prompt
+python skills/a1x-realsense-vision/scripts/a1x_vision.py
 
-# Cloud VLM (qwen3.5-plus)
-python skills/a1x-realsense-vision/scripts/a1x_vision.py --model cloud "describe the scene"
+# Custom prompt
+python skills/a1x-realsense-vision/scripts/a1x_vision.py "桌上有什么物体"
 
 # Save captured image
 python skills/a1x-realsense-vision/scripts/a1x_vision.py --save /tmp/snap.jpg "what's on the desk?"
