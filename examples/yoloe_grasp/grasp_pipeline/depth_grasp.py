@@ -86,6 +86,15 @@ def compute_pca_angle(
         f"eigenvalue ratio: {ev_ratio:.2f}"
     )
 
+    # For nearly-square/circular objects (ratio < 1.5), PCA is unreliable —
+    # it tends to pick the diagonal of a square. Default to 0° (straight grasp).
+    if ev_ratio < 1.5:
+        logger.info(
+            f"PCA ratio {ev_ratio:.2f} < 1.5 (near-square shape) — "
+            f"ignoring unstable angle {np.degrees(angle):.1f}°, using 0°"
+        )
+        return 0.0
+
     return float(angle)
 
 

@@ -5,7 +5,7 @@ Orchestrates the complete pipeline:
     1. Initialize robot
     2. Move to observation pose
     3. Capture RGBD from D405
-    4. (Optional) YOLOe target filter + build point cloud
+    4. (Optional) SAM3 target filter + build point cloud
     5. Run AnyGrasp inference + select best grasp
     6. Transform grasp from camera frame to robot base frame
     7. Solve IK and execute grasp motion (pre-grasp → grasp → lift)
@@ -43,7 +43,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # ── Reuse existing grasp_pipeline modules ───────────────────────────────────
 from examples.yoloe_grasp.grasp_pipeline.capture_rgbd import RGBDCapture
-from examples.yoloe_grasp.grasp_pipeline.yoloe_detector import YOLOeDetector
+from examples.yoloe_grasp.grasp_pipeline.sam3_detector import Sam3Detector
 from examples.yoloe_grasp.grasp_pipeline.coordinate_transform import (
     load_handeye_calibration,
     compute_T_base_ee_from_fk,
@@ -294,13 +294,13 @@ def step_4_build_point_cloud(
     target_name: str = "",
     debug: bool = False,
 ):
-    """Step 4: (Optional) YOLOe filter + build point cloud.
+    """Step 4: (Optional) SAM3 filter + build point cloud.
 
     Returns:
         Tuple of (points, colors) — both float32.
     """
     print("\n" + "=" * 60)
-    print("STEP 4: Build Point Cloud" + (" (with YOLOe filter)" if target_name else ""))
+    print("STEP 4: Build Point Cloud" + (" (with SAM3 filter)" if target_name else ""))
     print("=" * 60)
 
     fx, fy = intrinsic[0, 0], intrinsic[1, 1]
@@ -310,13 +310,11 @@ def step_4_build_point_cloud(
 
     seg_mask = None
     if target_name:
-        print(f"  Detecting target: '{target_name}' with YOLOe …")
-        checkpoint = str(PROJECT_ROOT / yoloe_cfg["checkpoint"])
+        print(f"  Detecting target: '{target_name}' with SAM3 …")
         device = yoloe_cfg.get("device", "cuda:0")
-        conf_thr = yoloe_cfg.get("conf_threshold", 0.25)
 
-        detector = YOLOeDetector(checkpoint, device=device)
-        det = detector.detect(color_bgr, [target_name], conf_threshold=conf_thr)
+        detector = Sam3Detector(device=device)
+        det = detector.detect(color_bgr, [target_name], conf_threshold=0.0)
 
         if det is None:
             print("  ✗ No object detected! Using full scene point cloud.")
@@ -345,7 +343,7 @@ def step_4_build_point_cloud(
                     overlay = vis.copy()
                     overlay[seg_mask] = (0, 255, 0)
                     vis = cv2.addWeighted(vis, 0.7, overlay, 0.3, 0)
-                cv2.imshow("YOLOe Detection", vis)
+                cv2.imshow("SAM3 Detection", vis)
                 print("    Showing detection (press any key to continue) …")
                 cv2.waitKey(0)
                 cv2.destroyAllWindows()
@@ -822,7 +820,7 @@ def parse_args():
         "--target-name",
         type=str,
         default=None,
-        help="Override target object name for YOLOe filtering (e.g. 'banana')",
+        help="Override target object name for SAM3 filtering (e.g. 'banana')",
     )
     parser.add_argument(
         "--dry-run",
@@ -881,7 +879,7 @@ def main():
     # ── Step 3: Capture RGBD ────────────────────────────────────────────
     color, depth, intrinsic = step_3_capture_rgbd(camera_cfg, dry_run=args.dry_run)
 
-    # ── Step 4: Build point cloud (optional YOLOe filter) ───────────────
+    # ── Step 4: Build point cloud (optional SAM3 filter) ────────────────
     target_name = args.target_name or yoloe_cfg.get("target_name", "")
     points, colors_pc = step_4_build_point_cloud(
         color, depth, intrinsic,

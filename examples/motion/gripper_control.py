@@ -74,7 +74,7 @@ def main():
     
     # Set specific positions
     print("\n4. Setting specific gripper positions...")
-    # positions = [25.0, 50.0, 75.0, 50.0, 0.0]
+    positions = [25.0, 50.0, 75.0, 50.0, 0.0]
     # positions = [-25.0]
 
     for target_pos in positions:

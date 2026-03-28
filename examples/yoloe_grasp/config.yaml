@@ -9,7 +9,8 @@ observation_pose: [0.0, 1.0, -0.93, 0.83, 0.0, 0.0]
 # Placement pose — joint angles [rad]. After lifting the object the arm
 # moves here and opens the gripper. Set to the same as observation_pose
 # by default; change to a different pose for a distinct drop location.
-place_pose: [0.75, 1.0, -0.93, 0.83, 0.0, 0.0]
+# place_pose: [0.75, 1.0, -0.93, 0.83, 0.0, 0.0]
+place_pose: [1.3, 1.3, -0.7, 0.5, 0.0, 0.0]
 
 # ── Camera ──────────────────────────────────────────────────────────────────
 camera:
@@ -29,7 +30,7 @@ yoloe:
   checkpoint: "refence_code/yoloe/yoloe-v8l-seg.pt"
   # Default target object names (text prompts).
   # Can be overridden with --target-name on the CLI.
-  target_names: "cube" # remote
+  target_names: "banana" # remote, rectangle
   device: "cuda:0"
   conf_threshold: 0.2
   # Height offset above the detected surface (meters).
@@ -70,7 +71,9 @@ motion:
   # Interpolation steps for smooth motion
   smooth_steps: 30
   # Joint-command publish rate [Hz]
-  control_rate_hz: 10.0
+  control_rate_hz: 20.0
+  # Interpolation type for trajectory
+  interpolation_type: cosine
   # Time to wait after gripper close command [seconds]
   gripper_close_delay: 2.5
 

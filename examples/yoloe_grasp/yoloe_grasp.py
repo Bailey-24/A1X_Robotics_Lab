@@ -601,8 +601,8 @@ def parse_args():
     parser.add_argument(
         "--detector",
         choices=["yoloe", "sam3"],
-        default="yoloe",
-        help="Detector backend: 'yoloe' (default) or 'sam3'",
+        default="sam3",
+        help="Detector backend: 'sam3' (default) or 'yoloe'",
     )
     parser.add_argument(
         "--target-name",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """AnyGrasp Point Cloud Grasp Visualization.
 
-Captures RGBD from D405, optionally segments a target object with YOLOe,
+Captures RGBD from D405, optionally segments a target object with SAM3,
 builds a 3D point cloud, runs AnyGrasp grasp detection, and visualizes
 the detected grasp poses in Open3D.
 
@@ -27,7 +27,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from examples.yoloe_grasp.grasp_pipeline.capture_rgbd import RGBDCapture
-from examples.yoloe_grasp.grasp_pipeline.yoloe_detector import YOLOeDetector
+from examples.yoloe_grasp.grasp_pipeline.sam3_detector import Sam3Detector
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -95,7 +95,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--top-n", type=int, default=None, help="Override top_n from config")
     p.add_argument("--target-name", type=str, default=None,
-                   help="Target object name for YOLOe filtering (overrides config)")
+                   help="Target object name for SAM3 filtering (overrides config)")
     p.add_argument("--no-preview", action="store_true", help="Skip camera live preview")
     p.add_argument("--debug", action="store_true", help="Enable Open3D visualization")
     return p.parse_args()
@@ -183,18 +183,16 @@ def main() -> int:
     print(f"  Intrinsics: fx={fx:.2f}, fy={fy:.2f}, cx={cx:.2f}, cy={cy:.2f}")
     print(f"  Depth scale: 1/{factor_depth}")
 
-    # ── 3. (Optional) YOLOe target-object segmentation ──────────────────
+    # ── 3. (Optional) SAM3 target-object segmentation ───────────────────
     target_name = args.target_name or yoloe_cfg.get("target_name", "")
     seg_mask = None  # (H, W) bool — None means "use entire scene"
 
     if target_name:
-        print(f"\n[2/5] Detecting target object with YOLOe: '{target_name}' …")
-        checkpoint = str(PROJECT_ROOT / yoloe_cfg["checkpoint"])
+        print(f"\n[2/5] Detecting target object with SAM3: '{target_name}' …")
         device = yoloe_cfg.get("device", "cuda:0")
-        conf_thr = yoloe_cfg.get("conf_threshold", 0.25)
 
-        detector = YOLOeDetector(checkpoint, device=device)
-        det = detector.detect(color_bgr, [target_name], conf_threshold=conf_thr)
+        detector = Sam3Detector(device=device)
+        det = detector.detect(color_bgr, [target_name], conf_threshold=0.0)
 
         if det is None:
             print("  ✗ No object detected! Falling back to full scene.")
@@ -226,7 +224,7 @@ def main() -> int:
                     overlay = vis.copy()
                     overlay[seg_mask] = (0, 255, 0)
                     vis = cv2.addWeighted(vis, 0.7, overlay, 0.3, 0)
-                cv2.imshow("YOLOe Detection", vis)
+                cv2.imshow("SAM3 Detection", vis)
                 print("    Showing detection (press any key to continue) …")
                 cv2.waitKey(0)
                 cv2.destroyAllWindows()
