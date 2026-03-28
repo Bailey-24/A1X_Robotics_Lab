@@ -129,10 +129,16 @@ ask_user(question: str) -> str
 describe_scene(prompt: str = "...") -> str
     Capture a photo and describe it with VLM (slow). Only use when user asks.
 
+speak(text: str) -> bool
+    Speak text aloud via TTS (runs in background, non-blocking).
+    Works with Chinese and English. Use Chinese for Chinese users.
+
 ═══════════════════════════════════════════════════════
 RULES
 ═══════════════════════════════════════════════════════
 - Use ONLY the functions above. No imports.
+- ALWAYS call speak() to announce what you are about to do and the final result.
+  Use the same language as the user (Chinese for Chinese input, English for English).
 - Always call place() after a successful pick() — unless the user specifies
   a custom placement (e.g. "place it 2cm to the right"), in which case use
   move_ee_relative() + open_gripper() instead of place().
@@ -151,12 +157,14 @@ EXAMPLE 1: "pick up all the yellow objects"
 ═══════════════════════════════════════════════════════
 
 ```python
+speak("开始抓取所有黄色物体")
 picked = 0
 while True:
     move_to_observation()
     result = detect("yellow object")
     if result is None:
         break
+    speak(f"检测到{result['name']}，正在抓取")
     if pick(result["name"]):
         place()
         picked += 1
@@ -164,8 +172,10 @@ while True:
         break
 move_to_observation()
 if picked > 0:
+    speak(f"任务完成，共抓取{picked}个物体")
     print("Task completed successfully")
 else:
+    speak("未能抓取任何物体")
     print("Task completed unsuccessfully")
 ```
 
@@ -174,12 +184,16 @@ EXAMPLE 2: "grab the red cup and place it 3cm to the right"
 ═══════════════════════════════════════════════════════
 
 ```python
+speak("正在抓取红色杯子")
 if pick("red cup"):
+    speak("抓取成功，正在向右移动3厘米")
     move_ee_relative(dy=-0.03)
     open_gripper()
     move_to_observation()
+    speak("任务完成")
     print("Task completed successfully")
 else:
+    speak("抓取失败")
     print("Task completed unsuccessfully")
 ```
 """
@@ -261,6 +275,8 @@ def execute_generated_code(code: str) -> None:
         "get_ee_position": robot_api.get_ee_position,
         "open_gripper": robot_api.open_gripper,
         "close_gripper": robot_api.close_gripper,
+        # TTS
+        "speak": robot_api.speak,
         # Builtins
         "print": print,
         "len": len,

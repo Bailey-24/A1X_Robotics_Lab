@@ -150,6 +150,10 @@ if __name__ == "__main__":
 - Suggest small test movements first if the user's target positions are unfamiliar.
 - CAN bus must be configured before running (see `references/a1x-api.md`).
 - Add `time.sleep()` between sequential motions to allow the arm to settle.
+- **Self-collision prevention**: When chaining multiple `move_to_position_smooth()` calls for complex motion sequences (e.g. dancing, waving), ensure that each waypoint's joint angles do not cause links to collide with each other or the base. Be especially careful when joint2, joint3, and joint4 bend aggressively at the same time — the forearm can strike the base or itself. When generating code:
+  - Avoid driving adjacent joints to their limits simultaneously
+  - Insert intermediate transition waypoints between large movements
+  - Prefer known safe poses (home, observation) as transition points
 
 ## Reference
 

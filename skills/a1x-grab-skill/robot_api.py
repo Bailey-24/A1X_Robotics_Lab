@@ -96,21 +96,31 @@ def _get_controller() -> a1x_control.JointController:
 def _generate_prompt_variants(name: str) -> list[str]:
     """Generate progressively simpler prompt variants for SAM3.
 
-    Example: "yellow note" → ["yellow note", "note", "yellow object", "object"]
+    When a color is specified, all fallbacks preserve the color to avoid
+    matching wrong-colored objects.
+
+    Examples:
+        "yellow note"  → ["yellow note", "yellow object"]
+        "yellow object"→ ["yellow object"]
+        "cube"         → ["cube", "object"]
     """
+    _COLOR_WORDS = {"red", "green", "blue", "yellow", "white", "black",
+                    "orange", "purple", "pink", "brown", "gray", "grey"}
+
     variants = [name]
     words = name.strip().split()
-    if len(words) >= 2:
-        # Drop adjectives, keep last word (the noun)
-        noun = words[-1]
-        variants.append(noun)
-        # color + "object" fallback
-        color_words = {"red", "green", "blue", "yellow", "white", "black",
-                       "orange", "purple", "pink", "brown", "gray", "grey"}
-        colors = [w for w in words if w.lower() in color_words]
-        if colors:
-            variants.append(f"{colors[0]} object")
-    variants.append("object")
+    colors = [w for w in words if w.lower() in _COLOR_WORDS]
+
+    if colors:
+        # Color specified — keep color in all fallbacks
+        variants.append(f"{colors[0]} object")
+    else:
+        # No color — safe to broaden to generic "object"
+        if len(words) >= 2:
+            noun = words[-1]
+            variants.append(noun)
+        variants.append("object")
+
     # Deduplicate while preserving order
     seen = set()
     return [v for v in variants if not (v in seen or seen.add(v))]
@@ -434,4 +444,31 @@ def close_gripper() -> bool:
     controller = _get_controller()
     controller.close_gripper()
     time.sleep(1.5)
+    return True
+
+
+# ── TTS ──────────────────────────────────────────────────────────────────────
+
+def speak(text: str) -> bool:
+    """Speak text aloud using TTS (non-blocking, runs in background).
+
+    Args:
+        text: Text to speak (Chinese or English).
+
+    Returns:
+        True (always).
+    """
+    import threading
+
+    def _do_speak():
+        try:
+            _tts_root = PROJECT_ROOT / "skills" / "a1x-tts" / "scripts"
+            if str(_tts_root) not in sys.path:
+                sys.path.insert(0, str(_tts_root))
+            from a1x_tts import speak as _speak
+            _speak(text, voice="onyx")
+        except Exception as e:
+            logger.warning("TTS failed: %s", e)
+
+    threading.Thread(target=_do_speak, daemon=True).start()
     return True

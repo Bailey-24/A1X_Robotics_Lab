@@ -61,12 +61,13 @@ description: 当用户明确提出物体抓取任务时触发（如"帮我抓桌
 |------|------|
 | `ask_user(question)` | 向用户提问，返回用户回答（处理歧义场景） |
 | `describe_scene(prompt="…")` | 拍照 + VLM 描述场景（较慢），返回英文物体列表。仅在用户询问场景时使用 |
+| `speak(text)` | 语音播报（后台非阻塞）。可选功能，用于播报关键状态，如 `speak("开始抓取")` |
 
 ## 生成代码规则
 
 LLM 生成代码须遵守：
 
-1. 仅使用上述原语函数，不得 import 任何模块
+1. 仅使用上述原语函数，不得 import 任何模块。`speak()` 为可选，适当使用可增强交互体验
 2. 成功 `pick()` 后必须调用 `place()`——除非用户指定自定义放置位置，则改用 `move_ee_relative() + open_gripper()`
 3. 多目标任务使用 while 循环：`move_to_observation()` → `detect()` → `pick()` → `place()` → 循环
 4. 有歧义时调用 `ask_user()`
@@ -187,13 +188,14 @@ else:
 ```
 skills/a1x-grab-skill/
 ├── SKILL.md
-├── robot_api.py          ← 原语函数库（11 个函数）
+├── robot_api.py          ← 原语函数库（12 个函数，含 speak）
 └── scripts/
     └── a1x_grab.py       ← 主入口：场景理解 → codegen → exec
 ```
 
 ## 与其他技能的关系
 
+- **a1x-tts**：`speak()` 调用 TTS 技能实现语音播报（后台非阻塞，不影响抓取流程）
 - **a1x-realsense-vision**：`describe_scene()` 内部复用相同的拍图 + VLM 逻辑
 - **a1x-arm-codegen**：适合自定义运动序列；本技能适合标准抓取任务
 - **yoloe_grasp**：`pick()` 直接复用其流水线步骤（step_2 ~ step_6 + IKExecutor）
