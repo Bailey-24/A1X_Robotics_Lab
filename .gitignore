@@ -13,3 +13,6 @@ useless_file/
 examples/camera/captured_frames/
 
 *.jpg
+
+.pytest_cache
+.TimeRecord
