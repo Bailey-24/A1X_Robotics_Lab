@@ -148,6 +148,39 @@ python skills/a1x-realsense-vision/scripts/a1x_vision.py "桌上有什么物体"
 python skills/a1x-realsense-vision/scripts/a1x_vision.py --save /tmp/snap.jpg "what's on the desk?"
 ```
 
+### 4. `skills/a1x-tts/` (Text-to-Speech)
+
+Convert text to speech audio using cloud TTS API. Supports multiple voices and can be used standalone or imported by other skills (e.g. have the robot speak while grasping).
+
+```bash
+# Speak text (plays immediately)
+python skills/a1x-tts/scripts/a1x_tts.py "Hello, I am the A1X robot"
+
+# Chinese text
+python skills/a1x-tts/scripts/a1x_tts.py "你好，我是A1X机器人"
+
+# Choose a voice (alloy, echo, fable, onyx, nova, shimmer)
+python skills/a1x-tts/scripts/a1x_tts.py --voice nova "Hello world"
+
+# Save to file
+python skills/a1x-tts/scripts/a1x_tts.py --output /tmp/hello.mp3 "Hello world"
+
+# HD quality
+python skills/a1x-tts/scripts/a1x_tts.py --model tts-1-hd "High quality speech"
+
+# Interactive mode
+python skills/a1x-tts/scripts/a1x_tts.py
+
+# Pipe from other commands
+echo "Task completed" | python skills/a1x-tts/scripts/a1x_tts.py --stdin
+```
+
+Use as a library from other scripts:
+```python
+from skills.a1x_tts.scripts.a1x_tts import speak
+speak("Grasping complete", voice="nova")
+```
+
 ---
 
 ## 🏗️ SDK Architecture
