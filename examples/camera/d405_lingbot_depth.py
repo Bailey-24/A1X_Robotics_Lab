@@ -22,7 +22,7 @@ except ImportError:
     sys.exit(1)
 
 # lingbot-depth 路径
-LINGBOT_DIR = os.path.join(os.path.dirname(__file__), "../../reference_code/lingbot-depth")
+LINGBOT_DIR = os.path.join(os.path.dirname(__file__), "../../refence_code/lingbot-depth")
 sys.path.insert(0, os.path.abspath(LINGBOT_DIR))
 from mdm.model.v2 import MDMModel
 

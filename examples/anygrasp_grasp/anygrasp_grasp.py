@@ -524,9 +524,9 @@ def step_6_transform_to_base(
     #   A1X +Y (closing)   = GraspNet +X (closing)
     #   A1X +Z (height)    = GraspNet +Y (height)
     R_graspnet_to_a1x = np.array([
-        [0.0, 0.0, 1.0],   # A1X X comes from GraspNet Z
-        [1.0, 0.0, 0.0],   # A1X Y comes from GraspNet X
-        [0.0, 1.0, 0.0],   # A1X Z comes from GraspNet Y
+        [0.0, 1.0, 0.0],   # A1X X comes from GraspNet Z
+        [0.0, 0.0, 1.0],   # A1X Y comes from GraspNet X
+        [1.0, 0.0, 0.0],   # A1X Z comes from GraspNet Y
     ])
 
     if use_anygrasp_rotation:
