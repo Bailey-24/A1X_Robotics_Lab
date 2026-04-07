@@ -1,0 +1,27 @@
+# Recording configuration for A1X demonstration collection
+# Used by: python data_collection/record_demo.py
+
+recording:
+  save_path: "./data/demos/"         # Root save directory
+  task_name: "yoloe_grasp"           # Sub-folder name (auto-appended with target)
+  save_freq: 20                      # Hz — recording frequency
+  start_episode: 0                   # Starting episode index
+  num_episodes: 10                   # Number of episodes to record
+  move_check: false                  # Don't skip stationary frames
+
+# RealSense D405 camera
+camera:
+  serial: null                       # null = auto-detect (set serial for multi-cam)
+  width: 640
+  height: 480
+  fps: 30
+
+# LeRobot conversion settings
+lerobot:
+  repo_id: "a1x/yoloe_grasp_demos"
+  robot_type: "a1x"
+  fps: 20                           # Must match recording save_freq
+  instruction: "Pick up the target object and place it to the side"
+
+# Path to yoloe_grasp config (relative to project root)
+yoloe_grasp_config: "examples/yoloe_grasp/config.yaml"

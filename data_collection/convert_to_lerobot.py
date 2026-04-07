@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""Convert raw A1X demonstration HDF5 files to LeRobot dataset format.
+
+Two-stage pipeline:
+    Stage 1: Raw HDF5 (from CollectAny) -> ACT-format HDF5
+    Stage 2: ACT-format HDF5 -> LeRobot Dataset
+
+Raw HDF5 structure (from recording):
+    /a1x_arm/joint      [N, 6]   float64
+    /a1x_arm/gripper    [N, 1]   float64
+    /a1x_arm/action     [N, 7]   float64
+    /a1x_arm/timestamp  [N]      int64
+    /cam_wrist/color    [N, H, W, 3]  uint8
+    /cam_wrist/timestamp [N]     int64
+
+ACT-format HDF5:
+    /observations/qpos                   [N, 7]  float32
+    /observations/images/cam_wrist       [N, H, W, 3]  uint8
+    /action                              [N, 7]  float32
+
+LeRobot Dataset:
+    observation.state           [7]   float32
+    observation.images.cam_wrist  image
+    action                      [7]   float32
+
+Usage:
+    # Convert raw HDF5 to LeRobot
+    python data_collection/convert_to_lerobot.py \\
+        --data-dir ./data/demos/yoloe_grasp/ \\
+        --repo-id a1x/yoloe_grasp_demos
+
+    # Stage 1 only (raw -> ACT HDF5)
+    python data_collection/convert_to_lerobot.py \\
+        --data-dir ./data/demos/yoloe_grasp/ \\
+        --act-only --act-output ./data/act_hdf5/
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+import cv2
+import h5py
+import numpy as np
+import tqdm
+
+# ── Path setup ─────────────────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_CYR_SRC = str(PROJECT_ROOT / "refence_code" / "control_your_robot" / "src")
+if _CYR_SRC not in sys.path:
+    sys.path.insert(0, _CYR_SRC)
+
+from robot.utils.base.data_handler import hdf5_groups_to_dict, get_item
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage 1: Raw HDF5 → ACT-format HDF5
+# ═══════════════════════════════════════════════════════════════════════
+
+# Mapping from raw HDF5 keys to ACT fields
+SINGLE_ARM_MAP = {
+    "cam_wrist": "cam_wrist.color",
+    "qpos": ["a1x_arm.joint", "a1x_arm.gripper"],
+    "action": "a1x_arm.action",
+}
+
+
+def convert_raw_to_act(raw_path: str, output_path: str) -> None:
+    """Convert a single raw HDF5 episode to ACT format."""
+    data = hdf5_groups_to_dict(raw_path)
+
+    with h5py.File(output_path, "w") as f:
+        # Extract data using mapping
+        input_data = {}
+        for key, src in SINGLE_ARM_MAP.items():
+            input_data[key] = get_item(data, src)
+
+        qpos = np.array(input_data["qpos"]).astype(np.float32)
+        action = np.array(input_data["action"]).astype(np.float32)
+
+        f.create_dataset("action", data=action, dtype="float32")
+
+        obs = f.create_group("observations")
+        obs.create_dataset("qpos", data=qpos, dtype="float32")
+
+        images = obs.create_group("images")
+
+        # Camera images
+        cam_data = input_data["cam_wrist"]
+        if isinstance(cam_data, np.ndarray) and cam_data.ndim == 4:
+            # Raw numpy images [N, H, W, 3]
+            images.create_dataset("cam_wrist", data=cam_data, dtype=np.uint8)
+        else:
+            # JPEG-encoded — decode
+            imgs = []
+            for frame in cam_data:
+                if isinstance(frame, (bytes, bytearray)):
+                    frame = np.frombuffer(frame, dtype=np.uint8)
+                img = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+                if img is not None:
+                    imgs.append(img)
+            images.create_dataset(
+                "cam_wrist", data=np.stack(imgs, axis=0), dtype=np.uint8
+            )
+
+
+def batch_convert_raw_to_act(data_dir: str, output_dir: str) -> list[str]:
+    """Convert all raw HDF5 files in a directory to ACT format.
+
+    Returns list of output file paths.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    raw_files = sorted(glob.glob(os.path.join(data_dir, "*.hdf5")))
+    if not raw_files:
+        print(f"No HDF5 files found in {data_dir}")
+        return []
+
+    print(f"Stage 1: Converting {len(raw_files)} raw episodes -> ACT format")
+    output_files = []
+    for i, raw_path in enumerate(tqdm.tqdm(raw_files, desc="Raw->ACT")):
+        out_path = os.path.join(output_dir, f"episode_{i}.hdf5")
+        convert_raw_to_act(raw_path, out_path)
+        output_files.append(out_path)
+
+    return output_files
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage 2: ACT HDF5 → LeRobot Dataset
+# ═══════════════════════════════════════════════════════════════════════
+
+MOTORS = [
+    "arm_joint1", "arm_joint2", "arm_joint3",
+    "arm_joint4", "arm_joint5", "arm_joint6",
+    "gripper",
+]
+CAMERAS = ["cam_wrist"]
+
+
+def create_lerobot_dataset(repo_id: str, fps: int = 20):
+    """Create an empty LeRobot dataset with A1X features."""
+    from lerobot.common.datasets.lerobot_dataset import (
+        HF_LEROBOT_HOME,
+        LeRobotDataset,
+    )
+
+    features = {
+        "observation.state": {
+            "dtype": "float32",
+            "shape": (len(MOTORS),),
+            "names": [MOTORS],
+        },
+        "action": {
+            "dtype": "float32",
+            "shape": (len(MOTORS),),
+            "names": [MOTORS],
+        },
+    }
+    for cam in CAMERAS:
+        features[f"observation.images.{cam}"] = {
+            "dtype": "image",
+            "shape": (3, 480, 640),
+            "names": ["channels", "height", "width"],
+        }
+
+    # Clean existing dataset if present
+    dataset_path = HF_LEROBOT_HOME / repo_id
+    if dataset_path.exists():
+        shutil.rmtree(dataset_path)
+
+    return LeRobotDataset.create(
+        repo_id=repo_id,
+        fps=fps,
+        robot_type="a1x",
+        features=features,
+        image_writer_threads=10,
+        image_writer_processes=5,
+    )
+
+
+def populate_lerobot_dataset(
+    dataset,
+    act_files: list[str],
+    instruction: str = "Pick up the target object and place it to the side",
+):
+    """Populate a LeRobot dataset from ACT-format HDF5 files."""
+    import torch
+
+    for ep_path in tqdm.tqdm(act_files, desc="ACT->LeRobot"):
+        with h5py.File(ep_path, "r") as ep:
+            state = torch.from_numpy(ep["/observations/qpos"][:])
+            action = torch.from_numpy(ep["/action"][:])
+            num_frames = state.shape[0]
+
+            # Load images
+            imgs = {}
+            for cam in CAMERAS:
+                key = f"/observations/images/{cam}"
+                if key in ep:
+                    uncompressed = ep[key].ndim == 4
+                    if uncompressed:
+                        img_array = ep[key][:]
+                    else:
+                        img_array = []
+                        for data in ep[key]:
+                            img_array.append(
+                                cv2.cvtColor(cv2.imdecode(data, 1), cv2.COLOR_BGR2RGB)
+                            )
+                        img_array = np.array(img_array)
+                    imgs[cam] = img_array
+
+            for i in range(num_frames):
+                frame = {
+                    "observation.state": state[i],
+                    "action": action[i],
+                    "task": instruction,
+                }
+                for cam, img_array in imgs.items():
+                    frame[f"observation.images.{cam}"] = img_array[i]
+
+                dataset.add_frame(frame)
+
+            dataset.save_episode()
+
+    return dataset
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CLI
+# ═══════════════════════════════════════════════════════════════════════
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Convert raw A1X demos to LeRobot format",
+    )
+    parser.add_argument(
+        "--data-dir",
+        required=True,
+        help="Directory containing raw HDF5 episodes (from record_demo.py)",
+    )
+    parser.add_argument(
+        "--repo-id",
+        default="a1x/yoloe_grasp_demos",
+        help="LeRobot dataset repo ID",
+    )
+    parser.add_argument(
+        "--fps",
+        type=int,
+        default=20,
+        help="Dataset FPS (should match recording save_freq)",
+    )
+    parser.add_argument(
+        "--instruction",
+        default="Pick up the target object and place it to the side",
+        help="Task instruction string for LeRobot dataset",
+    )
+    parser.add_argument(
+        "--act-only",
+        action="store_true",
+        help="Only run Stage 1 (raw -> ACT HDF5), skip LeRobot conversion",
+    )
+    parser.add_argument(
+        "--act-output",
+        default=None,
+        help="Output directory for ACT HDF5 (default: <data-dir>_act/)",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    data_dir = args.data_dir.rstrip("/")
+    act_output = args.act_output or f"{data_dir}_act"
+
+    print("=" * 60)
+    print("  A1X Demo -> LeRobot Converter")
+    print("=" * 60)
+
+    # ── Stage 1: Raw -> ACT ────────────────────────────────────────
+    act_files = batch_convert_raw_to_act(data_dir, act_output)
+    if not act_files:
+        return 1
+
+    print(f"  ACT HDF5 saved to: {act_output}/")
+
+    if args.act_only:
+        print("  (--act-only specified, skipping LeRobot conversion)")
+        return 0
+
+    # ── Stage 2: ACT -> LeRobot ────────────────────────────────────
+    print(f"\nStage 2: Converting ACT -> LeRobot (repo={args.repo_id})")
+    dataset = create_lerobot_dataset(args.repo_id, fps=args.fps)
+    dataset = populate_lerobot_dataset(dataset, act_files, instruction=args.instruction)
+
+    print(f"\n  LeRobot dataset created: {args.repo_id}")
+    print(f"  Total episodes: {len(act_files)}")
+    print(f"  FPS: {args.fps}")
+    print("=" * 60)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
