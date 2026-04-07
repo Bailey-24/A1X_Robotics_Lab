@@ -39,7 +39,6 @@ from __future__ import annotations
 import argparse
 import glob
 import os
-import re
 import shutil
 import sys
 from pathlib import Path
@@ -143,12 +142,28 @@ MOTORS = [
 CAMERAS = ["cam_wrist"]
 
 
+def _import_lerobot():
+    """Import LeRobotDataset across version differences.
+
+    LeRobot >= 0.4 reorganized: lerobot.common.datasets -> lerobot.datasets.
+    Try the new path first, then fall back to the legacy path.
+    """
+    try:
+        from lerobot.datasets.lerobot_dataset import (
+            HF_LEROBOT_HOME,
+            LeRobotDataset,
+        )
+    except ImportError:
+        from lerobot.common.datasets.lerobot_dataset import (  # type: ignore
+            HF_LEROBOT_HOME,
+            LeRobotDataset,
+        )
+    return HF_LEROBOT_HOME, LeRobotDataset
+
+
 def create_lerobot_dataset(repo_id: str, fps: int = 20):
     """Create an empty LeRobot dataset with A1X features."""
-    from lerobot.common.datasets.lerobot_dataset import (
-        HF_LEROBOT_HOME,
-        LeRobotDataset,
-    )
+    HF_LEROBOT_HOME, LeRobotDataset = _import_lerobot()
 
     features = {
         "observation.state": {

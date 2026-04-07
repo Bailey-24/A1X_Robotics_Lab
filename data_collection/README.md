@@ -124,12 +124,12 @@ with h5py.File("data/demos/yoloe_grasp_banana/0.hdf5", "r") as f:
 
 ```bash
 python data_collection/convert_to_lerobot.py \
-    --data-dir ./data/demos/yoloe_grasp_banana/ \
-    --repo-id a1x/yoloe_grasp_banana
+    --data-dir ./data/demos/yoloe_grasp_white_object/ \
+    --repo-id a1x/yoloe_grasp_white_object
 
 # Stage 1 only (raw -> ACT HDF5, skip LeRobot creation)
 python data_collection/convert_to_lerobot.py \
-    --data-dir ./data/demos/yoloe_grasp_banana/ \
+    --data-dir ./data/demos/yoloe_grasp_white_object/ \
     --act-only \
     --act-output ./data/act_hdf5/
 ```
@@ -139,7 +139,8 @@ The resulting LeRobot dataset lives at `~/.cache/huggingface/lerobot/a1x/yoloe_g
 ### 4. Load the LeRobot dataset
 
 ```python
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+# LeRobot >= 0.4 uses `lerobot.datasets`; older versions use `lerobot.common.datasets`
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 dataset = LeRobotDataset("a1x/yoloe_grasp_banana")
 print(f"Total frames: {len(dataset)}")
@@ -150,6 +151,53 @@ sample = dataset[0]
 print(sample.keys())
 # dict_keys(['observation.state', 'observation.images.cam_wrist', 'action', 'task', ...])
 ```
+
+### 5. Visualize the dataset
+
+LeRobot ships a built-in visualizer (`lerobot-dataset-viz`) that uses [Rerun.io](https://rerun.io) to display joint states, actions, and camera frames frame-by-frame.
+
+**Local viewing** (data and viewer on the same machine — easiest):
+
+```bash
+lerobot-dataset-viz \
+    --repo-id a1x/yoloe_grasp_white_object \
+    --episode-index 0
+```
+
+This launches a Rerun window showing:
+- Camera images (`observation.images.cam_wrist`) as a video stream
+- Joint positions (`observation.state`) as 7 time-series plots
+- Actions (`action`) as 7 time-series plots aligned with the state plots
+- Frame-by-frame scrubbing along the timeline
+
+**Save to a `.rrd` file** (for sharing or remote viewing):
+
+```bash
+lerobot-dataset-viz \
+    --repo-id a1x/yoloe_grasp_white_object \
+    --episode-index 0 \
+    --save 1 \
+    --output-dir ./viz/
+
+# Then open the file with the standalone Rerun viewer
+rerun ./viz/a1x_yoloe_grasp_white_object_episode_0.rrd
+```
+
+**Remote viewing over the network** (record on the robot, view on your laptop):
+
+```bash
+# On the robot machine:
+lerobot-dataset-viz \
+    --repo-id a1x/yoloe_grasp_white_object \
+    --episode-index 0 \
+    --mode distant \
+    --grpc-port 9876
+
+# On your laptop:
+rerun rerun+http://<robot-ip>:9876/proxy
+```
+
+> **Note**: The dataset must already exist in `~/.cache/huggingface/lerobot/<repo-id>/` (which is where `convert_to_lerobot.py` writes it). If you need to point at a different location, pass `--root /path/to/dataset/parent/`.
 
 ## Configuration
 
