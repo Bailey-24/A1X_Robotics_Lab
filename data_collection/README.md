@@ -160,7 +160,7 @@ LeRobot ships a built-in visualizer (`lerobot-dataset-viz`) that uses [Rerun.io]
 
 ```bash
 lerobot-dataset-viz \
-    --repo-id a1x/yoloe_grasp_white_object \
+    --repo-id ~/.cache/huggingface/lerobot/a1x/yoloe_grasp_white_object \
     --episode-index 0
 ```
 

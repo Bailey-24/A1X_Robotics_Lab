@@ -169,12 +169,12 @@ def create_lerobot_dataset(repo_id: str, fps: int = 20):
         "observation.state": {
             "dtype": "float32",
             "shape": (len(MOTORS),),
-            "names": [MOTORS],
+            "names": MOTORS,
         },
         "action": {
             "dtype": "float32",
             "shape": (len(MOTORS),),
-            "names": [MOTORS],
+            "names": MOTORS,
         },
     }
     for cam in CAMERAS:

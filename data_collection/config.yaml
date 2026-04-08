@@ -9,6 +9,14 @@ recording:
   num_episodes: 10                   # Number of episodes to record
   move_check: false                  # Don't skip stationary frames
 
+  # ── Pre-roll buffer + motion gating ──
+  # Avoid recording the long stationary period at the start of each episode
+  # (e.g. while the user is typing 'yes' at the safety prompt).  The recorder
+  # buffers frames until the joints actually start moving.
+  pre_roll_frames: 10                # frames retained before motion (10 @ 20Hz = 0.5s)
+  motion_threshold: 0.005            # rad — joint diff needed to trigger commit
+                                     # set to 0.0 to disable gating (record from t=0)
+
 # RealSense D405 camera
 camera:
   serial: null                       # null = auto-detect (set serial for multi-cam)

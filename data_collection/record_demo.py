@@ -237,6 +237,8 @@ def main():
     save_path = recording["save_path"]
     task_name = recording["task_name"]
     record_freq = recording.get("save_freq", 20)
+    pre_roll_frames = recording.get("pre_roll_frames", 10)
+    motion_threshold = recording.get("motion_threshold", 0.005)
     num_episodes = args.num_episodes or recording.get("num_episodes", 10)
     start_episode = args.start_episode if args.start_episode is not None else recording.get("start_episode", 0)
 
@@ -274,7 +276,12 @@ def main():
             camera_fps=camera_cfg.get("fps", 30),
         )
 
-    recorder = DemoRecorder(robot, record_freq=record_freq)
+    recorder = DemoRecorder(
+        robot,
+        record_freq=record_freq,
+        pre_roll_frames=pre_roll_frames,
+        motion_threshold=motion_threshold,
+    )
 
     # ── Record episodes ────────────────────────────────────────────
     successful = 0
