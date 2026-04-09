@@ -47,7 +47,7 @@ SAVE_FREQ="${SAVE_FREQ:-2000}"                  # Save checkpoint every N steps
 EVAL_FREQ="${EVAL_FREQ:-0}"                     # Eval frequency (0=disabled for real robot)
 
 # WandB settings
-WANDB_ENABLE="${WANDB_ENABLE:-false}"
+WANDB_ENABLE="${WANDB_ENABLE:-true}"
 WANDB_PROJECT="${WANDB_PROJECT:-a1x_act_training}"
 
 # Hardware settings

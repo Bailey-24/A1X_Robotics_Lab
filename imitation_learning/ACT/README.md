@@ -207,6 +207,13 @@ Reduce batch size:
 - Try increasing KL weight: `--kl-weight 50`
 - Verify data quality by visualizing: `python -m lerobot.scripts.visualize_dataset --repo-id a1x/your_task`
 
+
+
+
+# eval Custom checkpoint
+python imitation_learning/ACT/deploy.py --checkpoint outputs/train/.../checkpoints/last/pretrained_model
+
+
 ## References
 
 - [ACT Paper](https://arxiv.org/abs/2304.13705): Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware

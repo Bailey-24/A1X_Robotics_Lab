@@ -5,15 +5,21 @@ Runs the yoloe_grasp pipeline as the expert policy while a background
 thread records joint states + D405 camera images at a fixed frequency.
 Episodes are saved as HDF5 files via the control_your_robot framework.
 
+After each successful grasp, the object is repositioned using a cyclic
+relocation pattern (right → down → left → up, 5 cm each) with a 10°
+wrist rotation, keeping the object within the workspace for the next
+episode.  This enables fully automated multi-episode data collection.
+
 Usage:
     python data_collection/record_demo.py --target-name banana
     python data_collection/record_demo.py --target-name cup --num-episodes 10
-    python data_collection/record_demo.py --dry-run --num-episodes 1
+    python data_collection/record_demo.py --dry-run --num-episodes 8
 """
 from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 import time
 from pathlib import Path
@@ -36,7 +42,6 @@ from examples.yoloe_grasp.yoloe_grasp import (
     step_5_compute_grasp,
     step_6_transform_to_base,
     step_7_execute_grasp,
-    step_8_place_and_return,
     move_to_joint_pose,
     load_config as load_grasp_config,
 )
@@ -47,10 +52,105 @@ logging.basicConfig(
 )
 logger = logging.getLogger("record_demo")
 
+# ── Cyclic relocation constants ────────────────────────────────────────
+# After each successful grasp+lift, the object is moved to a nearby
+# position so it stays in the workspace for the next episode.
+# Coordinate system (base frame): +X=forward, +Y=left, +Z=up.
+RELOCATION_OFFSETS = [
+    (0.0, -0.05, 0.0),   # episode % 4 == 0: 5 cm right  (-Y)
+    (0.0,  0.0, -0.05),  # episode % 4 == 1: 5 cm down   (-Z)
+    (0.0,  0.05, 0.0),   # episode % 4 == 2: 5 cm left   (+Y)
+    (0.0,  0.0,  0.05),  # episode % 4 == 3: 5 cm up     (+Z)
+]
+RELOCATION_LABELS = ["RIGHT (-Y)", "DOWN (-Z)", "LEFT (+Y)", "UP (+Z)"]
+
+WRIST_ROTATION_RAD = math.radians(10)  # 10° per episode on joint 6
+
+# Joint 6 limits from URDF
+_JOINT6_MIN = -2.8798
+_JOINT6_MAX = 2.8798
+
+# Stop after this many consecutive failures (object likely left workspace)
+MAX_CONSECUTIVE_FAILURES = 3
+
 
 def load_record_config(config_path: str | Path) -> dict:
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
+
+
+def step_8_relocate_and_return(
+    controller,
+    episode_idx: int,
+    observation_pose: list[float],
+    dry_run: bool = False,
+) -> None:
+    """Move the grasped object to a nearby position, rotate wrist, release, return.
+
+    Cyclic pattern (indexed by ``episode_idx % 4``):
+        0 → 5 cm right, 1 → 5 cm down, 2 → 5 cm left, 3 → 5 cm up.
+    After the directional move, the wrist (joint 6) is rotated +10° to
+    diversify object orientation for the next grasp attempt.
+    """
+    print("\n" + "=" * 60)
+    print("STEP 8: Relocate Object & Return")
+    print("=" * 60)
+
+    direction_idx = episode_idx % 4
+    dx, dy, dz = RELOCATION_OFFSETS[direction_idx]
+    label = RELOCATION_LABELS[direction_idx]
+
+    print(f"  Direction: {label}  (dx={dx}, dy={dy}, dz={dz})")
+
+    if dry_run:
+        print(f"  [DRY RUN] Would move_ee_relative({dx}, {dy}, {dz})")
+        print(f"  [DRY RUN] Would rotate wrist +{math.degrees(WRIST_ROTATION_RAD):.0f} deg")
+        print(f"  [DRY RUN] Would open gripper, retract, return to observation")
+        move_to_joint_pose(controller, observation_pose, "observation", dry_run)
+        return
+
+    # 1. Move 5 cm in the designated direction (object still held)
+    print(f"  Moving {label} by 5 cm...")
+    ok = controller.move_ee_relative(dx, dy, dz, steps=30, rate_hz=20.0)
+    if not ok:
+        logger.warning("Relocation move failed — releasing and returning")
+        controller.open_gripper()
+        time.sleep(1.0)
+        move_to_joint_pose(controller, observation_pose, "observation", dry_run=False)
+        return
+
+    # 2. Rotate wrist +10 deg (joint 6 = index 5)
+    print(f"  Rotating wrist +{math.degrees(WRIST_ROTATION_RAD):.0f} deg...")
+    joints = controller.get_joint_states()
+    if joints:
+        positions = [joints[f'arm_joint{i}'] for i in range(1, 7)]
+        new_j6 = positions[5] + WRIST_ROTATION_RAD
+        clamped = max(_JOINT6_MIN, min(_JOINT6_MAX, new_j6))
+        if clamped != new_j6:
+            logger.warning(
+                f"Joint 6 hit limit: requested {math.degrees(new_j6):.1f} deg "
+                f"-> clamped to {math.degrees(clamped):.1f} deg"
+            )
+        positions[5] = clamped
+        controller.move_to_position_smooth(
+            positions, steps=30, rate_hz=20.0,
+            interpolation_type="cosine", wait_for_convergence=True,
+        )
+    else:
+        logger.warning("Could not read joints for wrist rotation — skipping")
+
+    # 3. Open gripper to release object at new position
+    print("  Opening gripper (release)...")
+    controller.open_gripper()
+    time.sleep(1.0)
+
+    # 4. Retract upward 5 cm to clear the object before returning
+    print("  Retracting 5 cm upward...")
+    controller.move_ee_relative(0.0, 0.0, 0.05, steps=30, rate_hz=20.0)
+
+    # 5. Return to observation pose
+    move_to_joint_pose(controller, observation_pose, "observation", dry_run=False)
+    print("  Relocate cycle complete")
 
 
 def run_episode(
@@ -60,13 +160,19 @@ def run_episode(
     grasp_cfg: dict,
     episode_id: int,
     args,
+    *,
+    cached_detector=None,
+    skip_confirmation: bool = False,
 ) -> bool:
     """Run one grasp episode with recording.
+
+    Recording captures only the observation → grasp → lift sequence.
+    The subsequent relocation step is NOT recorded — it is purely a
+    logistics operation to reposition the object for the next episode.
 
     Returns True if the episode completed successfully.
     """
     observation_pose = grasp_cfg["observation_pose"]
-    place_pose = grasp_cfg.get("place_pose", observation_pose)
     camera_cfg = grasp_cfg["camera"]
     yoloe_cfg = grasp_cfg["yoloe"]
     handeye_path = str(PROJECT_ROOT / grasp_cfg["handeye"]["calibration_path"])
@@ -81,6 +187,7 @@ def run_episode(
 
     # ── Start recording ────────────────────────────────────────────
     recorder.start_episode()
+    recording_stopped = False
 
     try:
         # ── Step 2: Move to observation pose ───────────────────────
@@ -115,12 +222,14 @@ def run_episode(
             target_name_override=args.target_name,
             visualize=args.visualize,
             detector_type=args.detector,
+            detector=cached_detector,
         )
 
         if detection is None:
             print("\n  No object detected — returning to observation pose.")
             move_to_joint_pose(controller, observation_pose, "observation", args.dry_run)
             recorder.stop_episode(episode_id=episode_id)
+            recording_stopped = True
             return False
 
         bbox, mask, score, class_name = detection
@@ -149,26 +258,46 @@ def run_episode(
         # ── Step 7: Execute grasp ─────────────────────────────────
         success = step_7_execute_grasp(
             controller, T_pre_grasp, T_grasp, T_lift,
-            motion_cfg, safety_cfg, dry_run=args.dry_run,
+            motion_cfg, safety_cfg,
+            dry_run=args.dry_run,
+            skip_confirmation=skip_confirmation,
         )
+
+        # ── Stop recording (observation → grasp → lift only) ──────
+        recorder.stop_episode(episode_id=episode_id)
+        recording_stopped = True
 
         if not success:
             print("\n  Grasp execution failed or was aborted.")
+            if not args.dry_run:
+                controller.open_gripper()
+                time.sleep(0.5)
             move_to_joint_pose(controller, observation_pose, "observation", args.dry_run)
-            recorder.stop_episode(episode_id=episode_id)
             return False
 
-        # ── Step 8: Place and return ──────────────────────────────
-        step_8_place_and_return(
-            controller, place_pose, observation_pose, dry_run=args.dry_run,
+        # ── Step 8: Relocate object & return (NOT recorded) ───────
+        step_8_relocate_and_return(
+            controller, episode_id, observation_pose, dry_run=args.dry_run,
         )
 
         print(f"\n  Episode {episode_id} complete")
         return True
 
+    except Exception as e:
+        logger.error(f"Episode {episode_id} failed with error: {e}")
+        # Best-effort recovery: return arm to observation pose
+        try:
+            if not args.dry_run:
+                controller.open_gripper()
+            move_to_joint_pose(controller, observation_pose, "observation", args.dry_run)
+        except Exception:
+            logger.error("Failed to return to observation pose during error recovery")
+        return False
+
     finally:
-        # Always stop recording (even on error/abort)
-        recorder.stop_episode(episode_id=episode_id)
+        # Safety net: ensure recording is stopped even on unexpected errors
+        if not recording_stopped:
+            recorder.stop_episode(episode_id=episode_id)
 
 
 def parse_args():
@@ -221,7 +350,7 @@ def main():
     args = parse_args()
 
     print("=" * 60)
-    print("  YOLOe Grasp — Demonstration Recorder")
+    print("  YOLOe Grasp — Automated Demonstration Recorder")
     print("=" * 60)
     if args.dry_run:
         print("  *** DRY RUN MODE ***")
@@ -250,9 +379,26 @@ def main():
     print(f"  Episodes: {start_episode} .. {start_episode + num_episodes - 1}")
     print(f"  Record freq: {record_freq} Hz")
     print(f"  Save path: {save_path}{task_name}/")
+    print(f"  Relocation pattern: RIGHT → DOWN → LEFT → UP (5 cm + 10° wrist)")
 
     # ── Step 1: Initialize A1X ─────────────────────────────────────
     controller = step_1_initialize(grasp_cfg, dry_run=args.dry_run)
+
+    # ── Pre-load detector model (loaded ONCE, reused every episode) ─
+    yoloe_cfg = grasp_cfg["yoloe"]
+    cached_detector = None
+    if not args.dry_run:
+        print("\n" + "=" * 60)
+        print("  PRE-LOADING DETECTOR MODEL")
+        print("=" * 60)
+        if args.detector == "sam3":
+            from examples.yoloe_grasp.grasp_pipeline.sam3_detector import Sam3Detector
+            cached_detector = Sam3Detector(device=yoloe_cfg.get("device", "cuda:0"))
+        else:
+            from examples.yoloe_grasp.grasp_pipeline.yoloe_detector import YOLOeDetector
+            checkpoint = str(PROJECT_ROOT / yoloe_cfg["checkpoint"])
+            cached_detector = YOLOeDetector(checkpoint, device=yoloe_cfg.get("device", "cuda:0"))
+        print(f"  Detector loaded: {type(cached_detector).__name__}")
 
     # ── Create recording robot ─────────────────────────────────────
     condition = {
@@ -283,23 +429,38 @@ def main():
         motion_threshold=motion_threshold,
     )
 
-    # ── Record episodes ────────────────────────────────────────────
+    # ── Record episodes (fully automated) ──────────────────────────
     successful = 0
+    consecutive_failures = 0
     try:
         for i in range(num_episodes):
             ep_id = start_episode + i
 
+            # Brief settle between episodes (no manual input needed)
             if i > 0:
-                print(f"\n  Press Enter to start episode {ep_id} (Ctrl+C to stop)...")
-                try:
-                    input()
-                except EOFError:
-                    break
+                time.sleep(1.0)
 
-            ok = run_episode(controller, robot, recorder, grasp_cfg, ep_id, args)
+            ok = run_episode(
+                controller, robot, recorder, grasp_cfg, ep_id, args,
+                cached_detector=cached_detector,
+                skip_confirmation=True,
+            )
             if ok:
                 successful += 1
+                consecutive_failures = 0
                 print(f"  Saved: {save_path}{task_name}/{ep_id}.hdf5")
+            else:
+                consecutive_failures += 1
+                logger.warning(
+                    f"Episode {ep_id} failed "
+                    f"({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES} consecutive)"
+                )
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        f"{MAX_CONSECUTIVE_FAILURES} consecutive failures — "
+                        f"object may have left workspace. Stopping."
+                    )
+                    break
     except KeyboardInterrupt:
         print("\n\n  Recording interrupted by user.")
     finally:

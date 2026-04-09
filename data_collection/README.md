@@ -6,6 +6,8 @@ Record joint states and camera images while the `yoloe_grasp` pipeline runs as a
 
 This package wraps the [control_your_robot](../refence_code/control_your_robot/) framework to record A1X arm + RealSense D405 data during autonomous grasping. The `yoloe_grasp` pipeline runs unmodified — a background recording thread polls joint states and camera frames at a fixed frequency and writes HDF5 episodes.
 
+Data collection is **fully automated**: after each successful grasp, the object is relocated to a nearby position (cyclic 5 cm right → down → left → up pattern with 10° wrist rotation), keeping it within the workspace so the next episode runs immediately — no manual intervention needed.
+
 ```
 yoloe_grasp (expert policy)         DemoRecorder (background thread @ 20Hz)
   |                                    |
@@ -72,7 +74,7 @@ data_collection/
 ### 1. Record demonstrations
 
 ```bash
-# Record 10 episodes of grasping a banana (default detector: SAM3)
+# Record 10 episodes of grasping a banana (fully automated, default detector: SAM3)
 python data_collection/record_demo.py --target-name banana
 
 # Custom episode count + detector
@@ -82,7 +84,7 @@ python data_collection/record_demo.py \
     --num-episodes 20
 
 # Dry run (no hardware, synthetic data, verifies pipeline)
-python data_collection/record_demo.py --dry-run --num-episodes 1
+python data_collection/record_demo.py --dry-run --num-episodes 8
 
 # Resume from a specific episode index
 python data_collection/record_demo.py \
@@ -92,15 +94,36 @@ python data_collection/record_demo.py \
 ```
 
 **What happens per episode:**
-1. Background recorder starts (polls at 20 Hz)
-2. `yoloe_grasp` runs its usual steps:
-   - Move to observation pose
-   - Capture RGBD (from the shared D405 sensor)
-   - Detect target with YOLOe/SAM3
-   - Compute 3D grasp, transform to base frame
-   - Solve IK and execute pre-grasp → grasp → lift → place → return
-3. Recorder stops, episode written as `<save_path>/<task>_<target>/<id>.hdf5`
-4. Press Enter to start the next episode
+
+```
+Episode 0:
+  [RECORD] observe -> detect -> grasp -> lift [/RECORD]
+           relocate RIGHT 5cm -> rotate wrist +10 deg -> release -> retract -> obs pose
+
+Episode 1:
+  [RECORD] observe -> detect -> grasp -> lift [/RECORD]
+           relocate DOWN 5cm -> rotate wrist +10 deg -> release -> retract -> obs pose
+
+Episode 2:
+  [RECORD] observe -> detect -> grasp -> lift [/RECORD]
+           relocate LEFT 5cm -> rotate wrist +10 deg -> release -> retract -> obs pose
+
+Episode 3:
+  [RECORD] observe -> detect -> grasp -> lift [/RECORD]
+           relocate UP 5cm -> rotate wrist +10 deg -> release -> retract -> obs pose
+
+Episode 4:  (cycle repeats)
+  ...
+```
+
+Key design points:
+
+- **Recording scope**: only the observation-through-lift sequence is recorded (not the relocation step). This captures the pure grasp skill without logistics motion.
+- **Cyclic relocation**: after each grasp, the object is moved 5 cm in a rotating direction (right → down → left → up), keeping it within the workspace. After a full 4-episode cycle, the object returns to approximately its original position.
+- **Wrist rotation**: +10 deg on joint 6 after each relocation, diversifying object orientation for richer training data.
+- **Model caching**: the detector (SAM3 or YOLOe) is loaded **once** before the episode loop and reused, saving significant startup time per episode.
+- **Safety**: the first episode prompts for interactive confirmation; all subsequent episodes run fully unattended.
+- **Failure handling**: 3 consecutive failures abort the run (likely means the object left the workspace). On any failure, the gripper is opened and the arm returns to observation pose before retrying.
 
 ### 2. Inspect recorded episodes
 
@@ -127,6 +150,10 @@ python data_collection/convert_to_lerobot.py \
     --data-dir ./data/demos/yoloe_grasp_white_object/ \
     --repo-id a1x/yoloe_grasp_white_object
 
+# Default (no flags): Raw HDF5 → LeRobot directly, no *_act/ directory created
+# --via-act: Old two-stage behavior (Raw → ACT → LeRobot)
+# --act-only: Only produce ACT HDF5 (unchanged)
+
 # Stage 1 only (raw -> ACT HDF5, skip LeRobot creation)
 python data_collection/convert_to_lerobot.py \
     --data-dir ./data/demos/yoloe_grasp_white_object/ \
@@ -134,7 +161,7 @@ python data_collection/convert_to_lerobot.py \
     --act-output ./data/act_hdf5/
 ```
 
-The resulting LeRobot dataset lives at `~/.cache/huggingface/lerobot/a1x/yoloe_grasp_banana/`.
+The resulting LeRobot dataset lives at `~/.cache/huggingface/lerobot/a1x/.../`.
 
 ### 4. Load the LeRobot dataset
 
@@ -170,32 +197,6 @@ This launches a Rerun window showing:
 - Actions (`action`) as 7 time-series plots aligned with the state plots
 - Frame-by-frame scrubbing along the timeline
 
-**Save to a `.rrd` file** (for sharing or remote viewing):
-
-```bash
-lerobot-dataset-viz \
-    --repo-id a1x/yoloe_grasp_white_object \
-    --episode-index 0 \
-    --save 1 \
-    --output-dir ./viz/
-
-# Then open the file with the standalone Rerun viewer
-rerun ./viz/a1x_yoloe_grasp_white_object_episode_0.rrd
-```
-
-**Remote viewing over the network** (record on the robot, view on your laptop):
-
-```bash
-# On the robot machine:
-lerobot-dataset-viz \
-    --repo-id a1x/yoloe_grasp_white_object \
-    --episode-index 0 \
-    --mode distant \
-    --grpc-port 9876
-
-# On your laptop:
-rerun rerun+http://<robot-ip>:9876/proxy
-```
 
 > **Note**: The dataset must already exist in `~/.cache/huggingface/lerobot/<repo-id>/` (which is where `convert_to_lerobot.py` writes it). If you need to point at a different location, pass `--root /path/to/dataset/parent/`.
 

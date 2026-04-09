@@ -69,7 +69,8 @@ JOINT_LIMITS = [
 ]
 
 # Home position — a safe neutral pose to return to between episodes
-HOME_POSITION = [0.0, 0.0043, -0.1, -0.0347, -0.0055, 0.0013]
+# HOME_POSITION = [0.0, 0.0043, -0.1, -0.0347, -0.0055, 0.0013]
+HOME_POSITION = [0.0, 1.0, -0.93, 0.83, 0.0, 0.0] # observation
 
 
 # ═══════════════════════════════════════════════════════════════════════════

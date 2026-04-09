@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Convert raw A1X demonstration HDF5 files to LeRobot dataset format.
 
-Two-stage pipeline:
+Default pipeline (direct):
+    Raw HDF5 (from CollectAny) -> LeRobot Dataset
+
+Optional two-stage pipeline (--via-act):
     Stage 1: Raw HDF5 (from CollectAny) -> ACT-format HDF5
     Stage 2: ACT-format HDF5 -> LeRobot Dataset
 
@@ -13,7 +16,7 @@ Raw HDF5 structure (from recording):
     /cam_wrist/color    [N, H, W, 3]  uint8
     /cam_wrist/timestamp [N]     int64
 
-ACT-format HDF5:
+ACT-format HDF5 (only with --via-act or --act-only):
     /observations/qpos                   [N, 7]  float32
     /observations/images/cam_wrist       [N, H, W, 3]  uint8
     /action                              [N, 7]  float32
@@ -24,10 +27,15 @@ LeRobot Dataset:
     action                      [7]   float32
 
 Usage:
-    # Convert raw HDF5 to LeRobot
+    # Direct: raw HDF5 -> LeRobot (default, no intermediate files)
     python data_collection/convert_to_lerobot.py \\
         --data-dir ./data/demos/yoloe_grasp/ \\
         --repo-id a1x/yoloe_grasp_demos
+
+    # Two-stage: raw -> ACT HDF5 -> LeRobot
+    python data_collection/convert_to_lerobot.py \\
+        --data-dir ./data/demos/yoloe_grasp/ \\
+        --repo-id a1x/yoloe_grasp_demos --via-act
 
     # Stage 1 only (raw -> ACT HDF5)
     python data_collection/convert_to_lerobot.py \\
@@ -247,6 +255,58 @@ def populate_lerobot_dataset(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Direct: Raw HDF5 → LeRobot (no intermediate ACT files)
+# ═══════════════════════════════════════════════════════════════════════
+
+def populate_lerobot_from_raw(
+    dataset,
+    raw_files: list[str],
+    instruction: str = "Pick up the target object and place it to the side",
+):
+    """Populate a LeRobot dataset directly from raw HDF5 files, skipping ACT HDF5."""
+    import torch
+
+    for raw_path in tqdm.tqdm(raw_files, desc="Raw->LeRobot"):
+        data = hdf5_groups_to_dict(raw_path)
+
+        # Same mapping as convert_raw_to_act(), done in-memory
+        input_data = {}
+        for key, src in SINGLE_ARM_MAP.items():
+            input_data[key] = get_item(data, src)
+
+        state = torch.from_numpy(np.array(input_data["qpos"]).astype(np.float32))
+        action = torch.from_numpy(np.array(input_data["action"]).astype(np.float32))
+
+        # Decode camera images
+        cam_data = input_data["cam_wrist"]
+        if isinstance(cam_data, np.ndarray) and cam_data.ndim == 4:
+            img_array = cam_data
+        else:
+            imgs = []
+            for frame in cam_data:
+                if isinstance(frame, (bytes, bytearray)):
+                    frame = np.frombuffer(frame, dtype=np.uint8)
+                img = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+                if img is not None:
+                    imgs.append(img)
+            img_array = np.stack(imgs, axis=0)
+
+        num_frames = state.shape[0]
+        for i in range(num_frames):
+            frame = {
+                "observation.state": state[i],
+                "action": action[i],
+                "task": instruction,
+                "observation.images.cam_wrist": img_array[i],
+            }
+            dataset.add_frame(frame)
+
+        dataset.save_episode()
+
+    return dataset
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -281,6 +341,11 @@ def parse_args():
         help="Only run Stage 1 (raw -> ACT HDF5), skip LeRobot conversion",
     )
     parser.add_argument(
+        "--via-act",
+        action="store_true",
+        help="Use two-stage pipeline (raw -> ACT HDF5 -> LeRobot) instead of direct conversion",
+    )
+    parser.add_argument(
         "--act-output",
         default=None,
         help="Output directory for ACT HDF5 (default: <data-dir>_act/)",
@@ -298,24 +363,38 @@ def main():
     print("  A1X Demo -> LeRobot Converter")
     print("=" * 60)
 
-    # ── Stage 1: Raw -> ACT ────────────────────────────────────────
-    act_files = batch_convert_raw_to_act(data_dir, act_output)
-    if not act_files:
+    raw_files = sorted(glob.glob(os.path.join(data_dir, "*.hdf5")))
+    if not raw_files:
+        print(f"No HDF5 files found in {data_dir}")
         return 1
 
-    print(f"  ACT HDF5 saved to: {act_output}/")
-
+    # ── --act-only: Raw -> ACT HDF5 only ──────────────────────────
     if args.act_only:
+        act_files = batch_convert_raw_to_act(data_dir, act_output)
+        if not act_files:
+            return 1
+        print(f"  ACT HDF5 saved to: {act_output}/")
         print("  (--act-only specified, skipping LeRobot conversion)")
         return 0
 
-    # ── Stage 2: ACT -> LeRobot ────────────────────────────────────
-    print(f"\nStage 2: Converting ACT -> LeRobot (repo={args.repo_id})")
-    dataset = create_lerobot_dataset(args.repo_id, fps=args.fps)
-    dataset = populate_lerobot_dataset(dataset, act_files, instruction=args.instruction)
+    # ── --via-act: two-stage Raw -> ACT -> LeRobot ────────────────
+    if args.via_act:
+        act_files = batch_convert_raw_to_act(data_dir, act_output)
+        if not act_files:
+            return 1
+        print(f"  ACT HDF5 saved to: {act_output}/")
+
+        print(f"\nStage 2: Converting ACT -> LeRobot (repo={args.repo_id})")
+        dataset = create_lerobot_dataset(args.repo_id, fps=args.fps)
+        dataset = populate_lerobot_dataset(dataset, act_files, instruction=args.instruction)
+    else:
+        # ── Default: direct Raw -> LeRobot (no ACT files) ────────
+        print(f"\nConverting {len(raw_files)} raw episodes -> LeRobot (repo={args.repo_id})")
+        dataset = create_lerobot_dataset(args.repo_id, fps=args.fps)
+        dataset = populate_lerobot_from_raw(dataset, raw_files, instruction=args.instruction)
 
     print(f"\n  LeRobot dataset created: {args.repo_id}")
-    print(f"  Total episodes: {len(act_files)}")
+    print(f"  Total episodes: {len(raw_files)}")
     print(f"  FPS: {args.fps}")
     print("=" * 60)
     return 0
