@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 # Add control_your_robot to path
-_CYR_SRC = str(Path(__file__).resolve().parent.parent / "refence_code" / "control_your_robot" / "src")
+_CYR_SRC = str(Path(__file__).resolve().parent.parent.parent / "refence_code" / "control_your_robot" / "src")
 if _CYR_SRC not in sys.path:
     sys.path.insert(0, _CYR_SRC)
 

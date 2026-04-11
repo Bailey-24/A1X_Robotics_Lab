@@ -11,9 +11,9 @@ wrist rotation, keeping the object within the workspace for the next
 episode.  This enables fully automated multi-episode data collection.
 
 Usage:
-    python data_collection/record_demo.py --target-name banana
-    python data_collection/record_demo.py --target-name cup --num-episodes 10
-    python data_collection/record_demo.py --dry-run --num-episodes 8
+    python imitation_learning/data_collection/record_demo.py --target-name banana
+    python imitation_learning/data_collection/record_demo.py --target-name cup --num-episodes 10
+    python imitation_learning/data_collection/record_demo.py --dry-run --num-episodes 8
 """
 from __future__ import annotations
 
@@ -28,11 +28,11 @@ import numpy as np
 import yaml
 
 # ── Path setup ─────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from data_collection.a1x_robot import A1XRecordingRobot
-from data_collection.recorder import DemoRecorder
+from imitation_learning.data_collection.a1x_robot import A1XRecordingRobot
+from imitation_learning.data_collection.recorder import DemoRecorder
 
 # Reuse yoloe_grasp step functions (pipeline runs unmodified)
 from examples.yoloe_grasp.yoloe_grasp import (

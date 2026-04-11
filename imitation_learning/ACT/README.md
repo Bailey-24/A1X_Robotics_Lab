@@ -30,8 +30,8 @@ pip install -e .
 
 Use the data collection pipeline to collect demonstrations:
 ```bash
-# See data_collection/README.md for detailed instructions
-python data_collection/collect_demos.py --task-name my_task
+# See imitation_learning/data_collection/README.md for detailed instructions
+python imitation_learning/data_collection/record_demo.py --task-name my_task
 ```
 
 The collected data should be converted to LeRobot format and stored at:
@@ -212,6 +212,15 @@ Reduce batch size:
 
 # eval Custom checkpoint
 python imitation_learning/ACT/deploy.py --checkpoint outputs/train/.../checkpoints/last/pretrained_model
+
+python imitation_learning/ACT/deploy.py \
+    --checkpoint outputs/train/2026-04-09_21-31-39_act_a1x_yoloe_grasp_white_object/checkpoints/004940/pretrained_model \
+    --action-steps 8
+
+# Option B: temporal ensembling (smoothest, but queries model every step)
+python imitation_learning/ACT/deploy.py \
+    --checkpoint outputs/train/2026-04-09_21-31-39_act_a1x_yoloe_grasp_white_object/checkpoints/004940/pretrained_model \
+    --temporal-ensemble 0.01
 
 
 ## References

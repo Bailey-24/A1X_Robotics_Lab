@@ -1,0 +1,107 @@
+# =============================================================================
+# Diffusion Policy Training Configuration for A1X Robot
+# =============================================================================
+# Edit this file to tune hyperparameters. Every field is documented.
+# CLI overrides: python train.py --batch_size 32 --lr 5e-5
+# =============================================================================
+
+# ── Dataset ──────────────────────────────────────────────────────────────────
+dataset:
+  repo_id: "a1x/yoloe_grasp_white_object"
+  root: "~/.cache/huggingface/lerobot/a1x/yoloe_grasp_white_object"
+  # episodes: null                        # list of episode indices, null = all
+  use_imagenet_stats: true                 # override camera stats with ImageNet mean/std
+  video_backend: "pyav"                    # "pyav" or "torchcodec"
+
+# ── Policy Architecture ─────────────────────────────────────────────────────
+policy:
+  # --- Temporal structure ---
+  n_obs_steps: 2                           # num past observation frames to stack
+  horizon: 8                              # diffusion prediction horizon (must be divisible by 2^len(down_dims))
+  n_action_steps: 3                        # num actions to execute per inference call
+
+  # --- Vision backbone ---
+  vision_backbone: "resnet18"              # resnet18 | resnet34 | resnet50
+  pretrained_backbone_weights: null        # null = random init (required when use_group_norm=true)
+  use_group_norm: true                     # replace BatchNorm with GroupNorm (better for small batches)
+  # NOTE: pretrained_backbone_weights and use_group_norm are mutually exclusive.
+  # GroupNorm replaces BatchNorm, which would ruin pretrained weights.
+  # For small-batch real-robot training, GroupNorm (random init) trains better.
+  spatial_softmax_num_keypoints: 32        # SpatialSoftmax output keypoints
+  use_separate_rgb_encoder_per_camera: false
+
+  # --- Image preprocessing ---
+  resize_shape: [240, 320]                 # resize before backbone (H, W); null = use original 480x640
+  crop_ratio: 0.95                         # random crop ratio during training (1.0 = no crop)
+  crop_is_random: true                     # random crop at train, center crop at eval
+
+  # --- UNet architecture ---
+  down_dims: [256, 512, 1024]              # feature dims per downsampling stage
+  kernel_size: 5                           # conv kernel size
+  n_groups: 8                              # GroupNorm groups in UNet blocks
+  diffusion_step_embed_dim: 128            # timestep embedding dimension
+  use_film_scale_modulation: true          # FiLM conditioning on diffusion timestep
+
+  # --- Noise scheduler ---
+  noise_scheduler_type: "DDIM"             # DDPM or DDIM (DDIM = faster inference)
+  num_train_timesteps: 100                 # forward diffusion steps
+  num_inference_steps: 10                  # reverse diffusion steps at inference (DDIM can use fewer)
+  beta_schedule: "squaredcos_cap_v2"       # noise schedule
+  beta_start: 0.0001
+  beta_end: 0.02
+  prediction_type: "epsilon"               # "epsilon" or "sample"
+  clip_sample: true                        # clip denoised actions to [-clip_range, +clip_range]
+  clip_sample_range: 1.0
+
+  # --- Normalization ---
+  normalization:
+    visual: "MEAN_STD"                     # ImageNet normalization for images
+    state: "MIN_MAX"                       # min-max normalization for joint states
+    action: "MIN_MAX"                      # min-max normalization for actions
+
+  # --- Loss ---
+  do_mask_loss_for_padding: false          # mask loss on padded actions at episode boundaries
+
+# ── Training ─────────────────────────────────────────────────────────────────
+training:
+  epochs: 300                              # number of epochs (auto-calculates steps from dataset size)
+  steps: null                              # total training steps; overrides epochs if set
+  batch_size: 64                           # batch size
+  num_workers: 4                           # dataloader workers
+  seed: 42                                 # random seed
+
+  # --- Optimizer (AdamW) ---
+  lr: 1.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
+  grad_clip_norm: 10.0                     # gradient clipping max norm
+
+  # --- LR scheduler ---
+  scheduler: "cosine"                      # cosine annealing with warmup
+  warmup_steps: 500                        # linear warmup steps
+
+  # --- Mixed precision ---
+  use_amp: false                           # automatic mixed precision (fp16/bf16)
+
+# ── Logging & Checkpointing ─────────────────────────────────────────────────
+logging:
+  log_freq: 100                            # print loss every N steps
+  save_freq: 5000                          # save checkpoint every N steps
+  save_last: true                          # always save a "last" checkpoint
+
+  # --- WandB ---
+  wandb:
+    enable: false
+    project: "a1x_dp_training"
+    entity: null                           # wandb team/user name; null = default
+    name: null                             # run name; null = auto-generated
+
+# ── Output ───────────────────────────────────────────────────────────────────
+output:
+  dir: null                                # output directory; null = auto-generated timestamped dir
+
+# ── Hardware ─────────────────────────────────────────────────────────────────
+hardware:
+  device: "cuda"                           # cuda | cpu | mps
+  gpu_id: 0                               # CUDA device index

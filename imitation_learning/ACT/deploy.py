@@ -81,24 +81,66 @@ def clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(value, hi))
 
 
-def load_policy(checkpoint_dir: str):
+def load_policy(
+    checkpoint_dir: str,
+    action_steps: int | None = None,
+    temporal_ensemble_coeff: float | None = None,
+):
     """Load ACT policy + pre/post-processors from a LeRobot checkpoint.
+
+    Args:
+        checkpoint_dir: Path to the pretrained_model/ directory.
+        action_steps: Override n_action_steps at inference time (must be
+            ≤ chunk_size). Reduces how many steps are executed open-loop
+            before re-observing. None = use the checkpoint's value.
+        temporal_ensemble_coeff: If set, enable temporal ensembling — blend
+            overlapping chunk predictions with exponential weights. Typical
+            value: 0.01. Eliminates chunk-boundary discontinuities. None = off.
 
     Returns:
         (policy, preprocess, postprocess, device)
     """
-    from lerobot.policies.act.modeling_act import ACTPolicy
+    from lerobot.policies.act.modeling_act import ACTPolicy, ACTTemporalEnsembler
     from lerobot.policies.factory import make_pre_post_processors
 
     logger.info("Loading ACT policy from %s ...", checkpoint_dir)
     policy = ACTPolicy.from_pretrained(checkpoint_dir)
 
     device = torch.device(policy.config.device)
+    chunk_size = policy.config.chunk_size
+
+    # ── Override n_action_steps (inference-only, no retraining needed) ─
+    if action_steps is not None:
+        if action_steps > chunk_size:
+            raise ValueError(
+                f"--action-steps ({action_steps}) must be ≤ chunk_size ({chunk_size})"
+            )
+        old = policy.config.n_action_steps
+        policy.config.n_action_steps = action_steps
+        logger.info(
+            "Overriding n_action_steps: %d → %d (chunk_size=%d)",
+            old, action_steps, chunk_size,
+        )
+
+    # ── Enable temporal ensembling (inference-only, no retraining needed) ─
+    if temporal_ensemble_coeff is not None:
+        policy.config.temporal_ensemble_coeff = temporal_ensemble_coeff
+        policy.temporal_ensembler = ACTTemporalEnsembler(
+            temporal_ensemble_coeff, chunk_size,
+        )
+        logger.info(
+            "Temporal ensembling enabled (coeff=%.4f, chunk_size=%d)",
+            temporal_ensemble_coeff, chunk_size,
+        )
+
+    # Re-initialize internal state with the updated config
+    policy.reset()
+
     logger.info(
-        "Policy loaded — device=%s, chunk_size=%d, n_action_steps=%d",
-        device,
-        policy.config.chunk_size,
-        policy.config.n_action_steps,
+        "Policy loaded — device=%s, chunk_size=%d, n_action_steps=%d, "
+        "temporal_ensemble=%s",
+        device, chunk_size, policy.config.n_action_steps,
+        temporal_ensemble_coeff or "off",
     )
 
     preprocess, postprocess = make_pre_post_processors(
@@ -123,7 +165,7 @@ def init_robot():
 
     # Start D405 camera
     sys.path.insert(0, _PROJECT_ROOT)
-    from data_collection.d405_sensor import D405Sensor
+    from imitation_learning.data_collection.d405_sensor import D405Sensor
 
     camera = D405Sensor("cam_wrist")
     camera.set_up(width=640, height=480, fps=30, is_depth=False)
@@ -207,6 +249,8 @@ def run_deployment(
     max_steps: int = 300,
     control_freq: int = 10,
     go_home: bool = True,
+    action_steps: int | None = None,
+    temporal_ensemble_coeff: float | None = None,
 ) -> None:
     """Run the full ACT deployment pipeline.
 
@@ -216,11 +260,17 @@ def run_deployment(
         max_steps: Maximum control steps per episode (safety limit).
         control_freq: Control loop frequency in Hz.
         go_home: Whether to move to home position before each episode.
+        action_steps: Override n_action_steps (None = use checkpoint value).
+        temporal_ensemble_coeff: Enable temporal ensembling (None = off).
     """
     from lerobot.policies.utils import prepare_observation_for_inference
 
     # 1. Load policy
-    policy, preprocess, postprocess, device = load_policy(checkpoint_dir)
+    policy, preprocess, postprocess, device = load_policy(
+        checkpoint_dir,
+        action_steps=action_steps,
+        temporal_ensemble_coeff=temporal_ensemble_coeff,
+    )
 
     # 2. Initialize robot + camera
     controller, camera = init_robot()
@@ -342,8 +392,14 @@ Examples:
     # Quick test: 1 episode, 50 steps (single action chunk)
     python imitation_learning/ACT/deploy.py --episodes 1 --max-steps 50
 
-    # Faster control loop
-    python imitation_learning/ACT/deploy.py --freq 20
+    # Reduce open-loop steps to fix chunk-boundary shaking
+    python imitation_learning/ACT/deploy.py --action-steps 8
+
+    # Enable temporal ensembling (smooths chunk transitions)
+    python imitation_learning/ACT/deploy.py --temporal-ensemble 0.01
+
+    # Combine both for maximum smoothness
+    python imitation_learning/ACT/deploy.py --action-steps 8 --temporal-ensemble 0.01
 """,
     )
     parser.add_argument(
@@ -375,6 +431,27 @@ Examples:
         action="store_true",
         help="Skip moving to home position before each episode",
     )
+    parser.add_argument(
+        "--action-steps",
+        type=int,
+        default=None,
+        help=(
+            "Override n_action_steps at inference time (must be ≤ chunk_size). "
+            "Reduces open-loop execution before re-observing. "
+            "Example: --action-steps 8 re-queries the model every 8 steps."
+        ),
+    )
+    parser.add_argument(
+        "--temporal-ensemble",
+        type=float,
+        default=None,
+        metavar="COEFF",
+        help=(
+            "Enable temporal ensembling to blend overlapping chunk predictions. "
+            "Eliminates chunk-boundary discontinuities. Typical value: 0.01. "
+            "Cannot be combined with --action-steps."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -397,4 +474,6 @@ if __name__ == "__main__":
         max_steps=args.max_steps,
         control_freq=args.freq,
         go_home=not args.no_home,
+        action_steps=args.action_steps,
+        temporal_ensemble_coeff=args.temporal_ensemble,
     )

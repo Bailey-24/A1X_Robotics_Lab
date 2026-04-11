@@ -4,7 +4,7 @@ Record joint states and camera images while the `yoloe_grasp` pipeline runs as a
 
 ## Overview
 
-This package wraps the [control_your_robot](../refence_code/control_your_robot/) framework to record A1X arm + RealSense D405 data during autonomous grasping. The `yoloe_grasp` pipeline runs unmodified — a background recording thread polls joint states and camera frames at a fixed frequency and writes HDF5 episodes.
+This package wraps the [control_your_robot](../../refence_code/control_your_robot/) framework to record A1X arm + RealSense D405 data during autonomous grasping. The `yoloe_grasp` pipeline runs unmodified — a background recording thread polls joint states and camera frames at a fixed frequency and writes HDF5 episodes.
 
 Data collection is **fully automated**: after each successful grasp, the object is relocated to a nearby position (cyclic 5 cm right → down → left → up pattern with 10° wrist rotation), keeping it within the workspace so the next episode runs immediately — no manual intervention needed.
 
@@ -27,7 +27,7 @@ yoloe_grasp (expert policy)         DemoRecorder (background thread @ 20Hz)
 
 ## Prerequisites
 
-### 1. Hardware setup (see project [CLAUDE.md](../CLAUDE.md))
+### 1. Hardware setup (see project [CLAUDE.md](../../CLAUDE.md))
 
 ```bash
 # Configure CAN bus (after every reboot)
@@ -50,14 +50,14 @@ pip install lerobot tqdm
 
 ### 3. Hand-eye calibration & detector checkpoints
 
-- Hand-eye calibration: [examples/handeye/handeye_calibration.yaml](../examples/handeye/handeye_calibration.yaml) must exist
+- Hand-eye calibration: [examples/handeye/handeye_calibration.yaml](../../examples/handeye/handeye_calibration.yaml) must exist
 - YOLOe checkpoint (optional): `refence_code/yoloe/yoloe-v8l-seg.pt`
 - SAM3 (default detector): installed via `refence_code/sam3/`
 
 ## File Layout
 
 ```
-data_collection/
+imitation_learning/data_collection/
 ├── __init__.py
 ├── a1x_controller.py      # ArmController adapter for JointController
 ├── d405_sensor.py         # VisionSensor adapter for D405 (continuous capture)
@@ -75,19 +75,19 @@ data_collection/
 
 ```bash
 # Record 10 episodes of grasping a banana (fully automated, default detector: SAM3)
-python data_collection/record_demo.py --target-name banana
+python imitation_learning/data_collection/record_demo.py --target-name banana
 
 # Custom episode count + detector
-python data_collection/record_demo.py \
+python imitation_learning/data_collection/record_demo.py \
     --target-name cup \
     --detector yoloe \
     --num-episodes 20
 
 # Dry run (no hardware, synthetic data, verifies pipeline)
-python data_collection/record_demo.py --dry-run --num-episodes 8
+python imitation_learning/data_collection/record_demo.py --dry-run --num-episodes 8
 
 # Resume from a specific episode index
-python data_collection/record_demo.py \
+python imitation_learning/data_collection/record_demo.py \
     --target-name banana \
     --start-episode 10 \
     --num-episodes 5
@@ -146,7 +146,7 @@ with h5py.File("data/demos/yoloe_grasp_banana/0.hdf5", "r") as f:
 ### 3. Convert to LeRobot format
 
 ```bash
-python data_collection/convert_to_lerobot.py \
+python imitation_learning/data_collection/convert_to_lerobot.py \
     --data-dir ./data/demos/yoloe_grasp_white_object/ \
     --repo-id a1x/yoloe_grasp_white_object
 
@@ -155,7 +155,7 @@ python data_collection/convert_to_lerobot.py \
 # --act-only: Only produce ACT HDF5 (unchanged)
 
 # Stage 1 only (raw -> ACT HDF5, skip LeRobot creation)
-python data_collection/convert_to_lerobot.py \
+python imitation_learning/data_collection/convert_to_lerobot.py \
     --data-dir ./data/demos/yoloe_grasp_white_object/ \
     --act-only \
     --act-output ./data/act_hdf5/
@@ -284,7 +284,7 @@ The A1X controller adapter subscribes to `/motion_target/target_joint_state_arm`
 
 ## Verification checklist
 
-1. **Dry run** — `python data_collection/record_demo.py --dry-run --num-episodes 1` (no hardware)
+1. **Dry run** — `python imitation_learning/data_collection/record_demo.py --dry-run --num-episodes 1` (no hardware)
 2. **HDF5 structure** — inspect with the snippet above; verify shapes `(N, 6)`, `(N, 1)`, `(N, 7)`, `(N, 480, 640, 3)`
 3. **Value ranges** — joints in radians (~±π), gripper in `[0, 1]`, images `uint8 ∈ [0, 255]`
 4. **Timing** — `N ≈ episode_duration × save_freq` (small drift OK)
@@ -293,7 +293,7 @@ The A1X controller adapter subscribes to `/motion_target/target_joint_state_arm`
 
 ## Reference
 
-- [yoloe_grasp pipeline](../examples/yoloe_grasp/yoloe_grasp.py) — the expert policy
-- [a1x_control.py](../a1x_control.py) — `JointController` ROS 2 interface
-- [control_your_robot framework](../refence_code/control_your_robot/) — `ArmController`, `VisionSensor`, `Robot`, `CollectAny` base classes
+- [yoloe_grasp pipeline](../../examples/yoloe_grasp/yoloe_grasp.py) — the expert policy
+- [a1x_control.py](../../a1x_control.py) — `JointController` ROS 2 interface
+- [control_your_robot framework](../../refence_code/control_your_robot/) — `ArmController`, `VisionSensor`, `Robot`, `CollectAny` base classes
 - [LeRobot](https://github.com/huggingface/lerobot) — target dataset format

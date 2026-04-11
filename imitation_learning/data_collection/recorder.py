@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from data_collection.a1x_robot import A1XRecordingRobot
+from imitation_learning.data_collection.a1x_robot import A1XRecordingRobot
 
 logger = logging.getLogger("recorder")
 

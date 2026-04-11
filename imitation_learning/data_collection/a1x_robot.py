@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 # Add control_your_robot to path
-_CYR_SRC = str(Path(__file__).resolve().parent.parent / "refence_code" / "control_your_robot" / "src")
+_CYR_SRC = str(Path(__file__).resolve().parent.parent.parent / "refence_code" / "control_your_robot" / "src")
 if _CYR_SRC not in sys.path:
     sys.path.insert(0, _CYR_SRC)
 
 from robot.robot.base_robot import Robot
 
-from data_collection.a1x_controller import A1XArmController
-from data_collection.d405_sensor import D405Sensor
+from imitation_learning.data_collection.a1x_controller import A1XArmController
+from imitation_learning.data_collection.d405_sensor import D405Sensor
 
 
 class A1XRecordingRobot(Robot):

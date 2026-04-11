@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """Convert raw A1X demonstration HDF5 files to LeRobot dataset format.
 
+Action definition (RoboTwin-style):
+    action[t] = state[t+1]   (the next observed joint configuration)
+    This means each episode of N raw frames produces N-1 training frames,
+    where the last raw frame only serves as the action target for frame N-2.
+
+    The raw ``a1x_arm/action`` channel (IK-commanded targets) is **ignored**
+    in favour of this shift-by-one approach, which avoids latency and
+    tracking-error artefacts from the command topics.
+
 Default pipeline (direct):
     Raw HDF5 (from CollectAny) -> LeRobot Dataset
 
@@ -11,15 +20,15 @@ Optional two-stage pipeline (--via-act):
 Raw HDF5 structure (from recording):
     /a1x_arm/joint      [N, 6]   float64
     /a1x_arm/gripper    [N, 1]   float64
-    /a1x_arm/action     [N, 7]   float64
+    /a1x_arm/action     [N, 7]   float64   (ignored — see above)
     /a1x_arm/timestamp  [N]      int64
     /cam_wrist/color    [N, H, W, 3]  uint8
     /cam_wrist/timestamp [N]     int64
 
 ACT-format HDF5 (only with --via-act or --act-only):
-    /observations/qpos                   [N, 7]  float32
-    /observations/images/cam_wrist       [N, H, W, 3]  uint8
-    /action                              [N, 7]  float32
+    /observations/qpos                   [N-1, 7]  float32
+    /observations/images/cam_wrist       [N-1, H, W, 3]  uint8
+    /action                              [N-1, 7]  float32
 
 LeRobot Dataset:
     observation.state           [7]   float32
@@ -28,17 +37,17 @@ LeRobot Dataset:
 
 Usage:
     # Direct: raw HDF5 -> LeRobot (default, no intermediate files)
-    python data_collection/convert_to_lerobot.py \\
+    python imitation_learning/data_collection/convert_to_lerobot.py \\
         --data-dir ./data/demos/yoloe_grasp/ \\
         --repo-id a1x/yoloe_grasp_demos
 
     # Two-stage: raw -> ACT HDF5 -> LeRobot
-    python data_collection/convert_to_lerobot.py \\
+    python imitation_learning/data_collection/convert_to_lerobot.py \\
         --data-dir ./data/demos/yoloe_grasp/ \\
         --repo-id a1x/yoloe_grasp_demos --via-act
 
     # Stage 1 only (raw -> ACT HDF5)
-    python data_collection/convert_to_lerobot.py \\
+    python imitation_learning/data_collection/convert_to_lerobot.py \\
         --data-dir ./data/demos/yoloe_grasp/ \\
         --act-only --act-output ./data/act_hdf5/
 """
@@ -57,7 +66,7 @@ import numpy as np
 import tqdm
 
 # ── Path setup ─────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _CYR_SRC = str(PROJECT_ROOT / "refence_code" / "control_your_robot" / "src")
 if _CYR_SRC not in sys.path:
     sys.path.insert(0, _CYR_SRC)
@@ -69,16 +78,22 @@ from robot.utils.base.data_handler import hdf5_groups_to_dict, get_item
 # Stage 1: Raw HDF5 → ACT-format HDF5
 # ═══════════════════════════════════════════════════════════════════════
 
-# Mapping from raw HDF5 keys to ACT fields
+# Mapping from raw HDF5 keys to fields we need.
+# Note: ``a1x_arm.action`` (IK command targets) is intentionally omitted —
+# actions are derived as ``qpos[t+1]`` (RoboTwin-style shift-by-one).
 SINGLE_ARM_MAP = {
     "cam_wrist": "cam_wrist.color",
     "qpos": ["a1x_arm.joint", "a1x_arm.gripper"],
-    "action": "a1x_arm.action",
 }
 
 
 def convert_raw_to_act(raw_path: str, output_path: str) -> None:
-    """Convert a single raw HDF5 episode to ACT format."""
+    """Convert a single raw HDF5 episode to ACT format.
+
+    Actions are derived as ``action[t] = qpos[t+1]`` (RoboTwin-style).
+    The episode length shrinks from N to N-1: the last raw frame is used
+    only as the action target for the penultimate frame.
+    """
     data = hdf5_groups_to_dict(raw_path)
 
     with h5py.File(output_path, "w") as f:
@@ -87,8 +102,13 @@ def convert_raw_to_act(raw_path: str, output_path: str) -> None:
         for key, src in SINGLE_ARM_MAP.items():
             input_data[key] = get_item(data, src)
 
-        qpos = np.array(input_data["qpos"]).astype(np.float32)
-        action = np.array(input_data["action"]).astype(np.float32)
+        qpos_full = np.array(input_data["qpos"]).astype(np.float32)  # [N, 7]
+
+        # ── RoboTwin-style shift-by-one ──────────────────────────
+        # state[t] = qpos[t]     for t = 0 .. N-2
+        # action[t] = qpos[t+1]  for t = 0 .. N-2
+        qpos = qpos_full[:-1]   # [N-1, 7]
+        action = qpos_full[1:]  # [N-1, 7]
 
         f.create_dataset("action", data=action, dtype="float32")
 
@@ -97,13 +117,13 @@ def convert_raw_to_act(raw_path: str, output_path: str) -> None:
 
         images = obs.create_group("images")
 
-        # Camera images
+        # Camera images — trim to N-1 (drop last frame)
         cam_data = input_data["cam_wrist"]
         if isinstance(cam_data, np.ndarray) and cam_data.ndim == 4:
-            # Raw numpy images [N, H, W, 3]
-            images.create_dataset("cam_wrist", data=cam_data, dtype=np.uint8)
+            # Raw numpy images [N, H, W, 3] -> [N-1, H, W, 3]
+            images.create_dataset("cam_wrist", data=cam_data[:-1], dtype=np.uint8)
         else:
-            # JPEG-encoded — decode
+            # JPEG-encoded — decode and drop last frame
             imgs = []
             for frame in cam_data:
                 if isinstance(frame, (bytes, bytearray)):
@@ -112,7 +132,7 @@ def convert_raw_to_act(raw_path: str, output_path: str) -> None:
                 if img is not None:
                     imgs.append(img)
             images.create_dataset(
-                "cam_wrist", data=np.stack(imgs, axis=0), dtype=np.uint8
+                "cam_wrist", data=np.stack(imgs[:-1], axis=0), dtype=np.uint8
             )
 
 
@@ -263,7 +283,11 @@ def populate_lerobot_from_raw(
     raw_files: list[str],
     instruction: str = "Pick up the target object and place it to the side",
 ):
-    """Populate a LeRobot dataset directly from raw HDF5 files, skipping ACT HDF5."""
+    """Populate a LeRobot dataset directly from raw HDF5 files, skipping ACT HDF5.
+
+    Actions are derived as ``action[t] = qpos[t+1]`` (RoboTwin-style).
+    Each episode of N raw frames produces N-1 training frames.
+    """
     import torch
 
     for raw_path in tqdm.tqdm(raw_files, desc="Raw->LeRobot"):
@@ -274,13 +298,18 @@ def populate_lerobot_from_raw(
         for key, src in SINGLE_ARM_MAP.items():
             input_data[key] = get_item(data, src)
 
-        state = torch.from_numpy(np.array(input_data["qpos"]).astype(np.float32))
-        action = torch.from_numpy(np.array(input_data["action"]).astype(np.float32))
+        qpos_full = torch.from_numpy(np.array(input_data["qpos"]).astype(np.float32))
+
+        # ── RoboTwin-style shift-by-one ──────────────────────────
+        # state[t] = qpos[t]     for t = 0 .. N-2
+        # action[t] = qpos[t+1]  for t = 0 .. N-2
+        state = qpos_full[:-1]   # [N-1, 7]
+        action = qpos_full[1:]   # [N-1, 7]
 
         # Decode camera images
         cam_data = input_data["cam_wrist"]
         if isinstance(cam_data, np.ndarray) and cam_data.ndim == 4:
-            img_array = cam_data
+            img_array = cam_data[:-1]  # drop last frame to match N-1
         else:
             imgs = []
             for frame in cam_data:
@@ -289,9 +318,9 @@ def populate_lerobot_from_raw(
                 img = cv2.imdecode(frame, cv2.IMREAD_COLOR)
                 if img is not None:
                     imgs.append(img)
-            img_array = np.stack(imgs, axis=0)
+            img_array = np.stack(imgs[:-1], axis=0)  # drop last frame
 
-        num_frames = state.shape[0]
+        num_frames = state.shape[0]  # N-1
         for i in range(num_frames):
             frame = {
                 "observation.state": state[i],

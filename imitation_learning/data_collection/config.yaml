@@ -1,5 +1,5 @@
 # Recording configuration for A1X demonstration collection
-# Used by: python data_collection/record_demo.py
+# Used by: python imitation_learning/data_collection/record_demo.py
 
 recording:
   save_path: "./data/demos/"         # Root save directory

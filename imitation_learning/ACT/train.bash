@@ -36,8 +36,8 @@ BATCH_SIZE="${BATCH_SIZE:-8}"                   # Batch size
 NUM_WORKERS="${NUM_WORKERS:-4}"                 # Dataloader workers
 
 # ACT Policy settings
-CHUNK_SIZE="${CHUNK_SIZE:-50}"                  # Action chunk size (prediction horizon)
-N_ACTION_STEPS="${N_ACTION_STEPS:-50}"          # Number of action steps to execute
+CHUNK_SIZE="${CHUNK_SIZE:-4}"                  # Action chunk size (prediction horizon)
+N_ACTION_STEPS="${N_ACTION_STEPS:-2}"           # Number of action steps to execute
 KL_WEIGHT="${KL_WEIGHT:-10}"                    # KL divergence weight for VAE
 VISION_BACKBONE="${VISION_BACKBONE:-resnet18}" # Vision encoder backbone
 
@@ -350,5 +350,5 @@ echo ""
 echo "Checkpoints saved to: $OUTPUT_DIR"
 echo ""
 echo "To deploy this model, use:"
-echo "  python imitation_learning/ACT/deploy.py --checkpoint $OUTPUT_DIR/checkpoints/last"
+echo "  python imitation_learning/ACT/deploy.py --checkpoint $OUTPUT_DIR/checkpoints/last/pretrained_model"
 echo ""
