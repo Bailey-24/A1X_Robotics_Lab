@@ -73,6 +73,8 @@ Two main classes:
 - Subscribe: `/joint_states`, `/hdas/feedback_gripper`, `/motion_control/pose_ee_arm`, `/hdas/pose_ee_arm`
 - Publish: `/motion_target/target_joint_state_arm`, `/motion_target/target_position_gripper`
 
+> ⚠️ `/joint_states` is republished by `a1_x_jointTracker_demo_node` and **echoes commanded values with URDF clamping** — not a reliable indicator of physical motion. For real ~200 Hz hardware feedback, subscribe to `/hdas/feedback_arm` (BEST_EFFORT/VOLATILE QoS; `msg.name = ['arm']`, `msg.position` length 7 with joints 0..5 being arm_joint1..6). Attach the subscription to the JointController node so it shares the existing spin thread. See README "Troubleshooting" for the full pattern.
+
 **Key methods**:
 - State: `get_joint_states()`, `get_gripper_state()`, `get_ee_pose()`, `get_ee_position()`, `get_ee_orientation()`, `get_current_ee_from_fk()`
 - Joint control: `set_joint_positions(positions)`, `move_to_position_smooth(positions, steps, rate_hz, interpolation_type)`

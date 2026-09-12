@@ -16,9 +16,9 @@ dataset:
 # ── Policy Architecture ─────────────────────────────────────────────────────
 policy:
   # --- Temporal structure ---
-  n_obs_steps: 2                           # num past observation frames to stack
+  n_obs_steps: 3                           # num past observation frames to stack
   horizon: 8                              # diffusion prediction horizon (must be divisible by 2^len(down_dims))
-  n_action_steps: 3                        # num actions to execute per inference call
+  n_action_steps: 4                        # num actions to execute per inference call
 
   # --- Vision backbone ---
   vision_backbone: "resnet18"              # resnet18 | resnet34 | resnet50

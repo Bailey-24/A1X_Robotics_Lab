@@ -50,7 +50,7 @@ Tools for performing eye-in-hand calibration (calculating the transformation mat
 ### 3. `examples/motion/` (Basic Robot Control)
 Standalone scripts showing how to use the `a1x_control.py` API for direct robot manipulation.
 - **Move joints to a single pose**: `python examples/motion/joint_control_once.py`
-- **Move joints smoothly via interpolation**: `python examples/motion/joint_control_smooth.py`
+- **Interactive per-joint sliders (browser UI)**: `python examples/motion/joint_control_smooth.py` — opens Viser at http://localhost:8080/ with 6 per-joint sliders bounded by URDF limits, live HDAS feedback, tracking error, and a safety enable checkbox. Sends `set_joint_positions` at 5–100 Hz with per-cycle step capping.
 - **Control the gripper**: `python examples/motion/gripper_control.py`
 - **Read End-Effector (EE) pose via Forward Kinematics**: `python examples/motion/read_ee_pose.py`
 - **Read Joint states**: `python examples/motion/read_joint_pose.py`
@@ -183,8 +183,107 @@ speak("Grasping complete", voice="nova")
 
 ---
 
+## 🩺 Troubleshooting
+
+### CAN bus: no data on `/joint_states`, arm doesn't respond
+
+The arm feedback flows over CAN-FD (1M / 5M). If the launch prints `Joint state data not available` and `read_joint_pose.py` shows nothing, check the physical link before touching any Python code.
+
+**1. Check CAN state**
+```bash
+ip -details link show can0
+```
+Healthy = `state UP`, `LOWER_UP`, `state ERROR-ACTIVE`. If you see `BUS-OFF` or `NO-CARRIER`, the CAN link is broken.
+
+**2. Reset CAN and listen for arm broadcasts**
+```bash
+sudo ip link set can0 down
+sudo ip link set can0 type can bitrate 1000000 sample-point 0.875 dbitrate 5000000 fd on dsample-point 0.875
+sudo ip link set up can0
+timeout 5 candump can0
+```
+A healthy arm sends ~50 Hz on CAN ID `0x052` (48-byte CAN-FD frames). **Zero frames + zero errors = arm is not broadcasting.**
+
+**3. Common physical causes when arm is silent**
+- **CAN_H / CAN_L swapped on the transceiver terminal block** — the most common failure mode. Wrong polarity produces zero traffic AND zero errors (differential lines look "idle" to both sides). Swap the two signal wires on the PC-side board and retest.
+- **Aviation connector on arm side not fully locked** — twist the outer collar clockwise until it clicks; a "visually inserted" connector may not be electrically seated.
+- **Missing GND reference** between the PC-side CAN transceiver and the arm chassis.
+- **Missing 120Ω terminator** at one or both ends of the bus.
+- **Zombie `ARM_APP` processes** from previous runs still holding the CAN socket:
+  ```bash
+  pkill -9 -f ARM_APP && pkill -9 -f jointTracker
+  ```
+
+**4. Verify ACK with a test frame**
+```bash
+cansend can0 123#DEADBEEF
+ip -details link show can0 | grep state
+```
+If the interface immediately jumps to `BUS-OFF` after sending one frame, no node on the bus is ACKing → the arm CAN transceiver is not on the bus.
+
+### "Joint N doesn't move" — but tracking looks perfect on `/joint_states`
+
+`/joint_states` is published by `a1_x_jointTracker_demo_node` and **echoes commanded values** (with URDF-limit clamping). It is NOT a reliable indicator of physical motion.
+
+The **real** hardware feedback is on `/hdas/feedback_arm`, published by the HDAS driver at ~200 Hz.
+
+```bash
+ros2 topic echo /hdas/feedback_arm --once
+```
+
+For an interactive command-vs-measured comparison per joint, use:
+```bash
+python examples/motion/joint_control_smooth.py
+```
+The UI shows commanded target, measured position from `/hdas/feedback_arm`, and per-joint tracking error side by side.
+
+### URDF joint limits reference
+
+| Joint | Lower (rad) | Upper (rad) | Notes |
+|-------|-------------|-------------|-------|
+| 1 | -2.8798 | +2.8798 | ±165° |
+| 2 |  **0.0000** | +3.1416 | **Cannot go negative** |
+| 3 | -3.3161 |  **0.0000** | **Cannot go positive** |
+| 4 | -1.5708 | +1.5708 | ±90° |
+| 5 | -1.5708 | +1.5708 | ±90° |
+| 6 | -2.8798 | +2.8798 | ±165° |
+
+Measured hardware may occasionally read slightly outside URDF bounds (e.g. joint 3 at +0.03); the jointTracker clamps outgoing commands to URDF range. Source: `install/mobiman/lib/mobiman/configs/urdfs/a1x.urdf`.
+
+### Manually launching the ROS 2 stack (3 terminals)
+
+If you prefer manual control over the auto-launch inside `a1x_control.py`:
+
+```bash
+# terminal 0 — HDAS driver
+source /home/ubuntu/projects/A1Xsdk/install/setup.zsh
+ros2 launch HDAS a1xy.py
+
+# terminal 1 — mobiman jointTracker
+source /home/ubuntu/projects/A1Xsdk/install/setup.zsh
+ros2 launch mobiman A1x_jointTrackerdemo_launch.py
+
+# terminal 2 — inspect / command
+source /home/ubuntu/projects/A1Xsdk/install/setup.zsh
+ros2 topic echo /joint_states           # tracker output (echoes commands)
+ros2 topic echo /hdas/feedback_arm      # real hardware feedback (~200 Hz)
+```
+
+---
+
 ## 🏗️ SDK Architecture
 
 - `a1x_control.py` - Core object-oriented Python API wrapping ROS 2 Topics (`JointController`). Handles reliable, verified message passing so users don't need to write ROS code.
 - `pyroki/` - Python Robot Kinematics. A standalone, JAX-based fast IK/FK solver sub-project used by advanced workflows like `yoloe_grasp`.
 - `install/` - Compiled ROS 2 workspace containing the `HDAS` driver and `mobiman` controller bindings. Do not modify directly.
+
+### ROS 2 topics used by the SDK
+
+| Topic | Direction | Purpose |
+|-------|-----------|---------|
+| `/motion_target/target_joint_state_arm` | pub (SDK → controller) | Target 6-joint positions in radians |
+| `/motion_target/target_position_gripper` | pub | Gripper target (0 closed, 100 open) |
+| `/joint_states` | sub | Tracker output — echoes commands, clamps to URDF limits |
+| `/hdas/feedback_arm` | sub | **Raw hardware feedback (~200 Hz)** — use for real position |
+| `/hdas/feedback_gripper` | sub | Gripper state feedback |
+| `/motion_control/pose_ee_arm` | sub | End-effector pose (from FK / IK node) |

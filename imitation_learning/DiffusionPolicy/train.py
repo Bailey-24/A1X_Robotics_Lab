@@ -147,7 +147,7 @@ class TrainingCfg:
 @dataclass
 class LoggingCfg:
     log_freq: int = 100
-    save_freq: int = 5000
+    save_freq: int = 2000
     save_last: bool = True
     wandb_enable: bool = False
     wandb_project: str = "a1x_dp_training"

@@ -259,11 +259,15 @@ def step_4_detect_object(
     target_name_override: str | None = None,
     visualize: bool = False,
     detector_type: str = "yoloe",
+    detector=None,
 ):
     """Step 4: Detect target object via text-prompt segmentation.
 
     Args:
         detector_type: 'yoloe' (default) or 'sam3'.
+        detector: Pre-loaded detector instance (Sam3Detector or YOLOeDetector).
+            If provided, reuses it instead of constructing a new one — useful
+            for multi-episode runs where model loading is expensive.
 
     Returns:
         Tuple of (bbox_xyxy, mask, score, class_name).
@@ -283,7 +287,15 @@ def step_4_detect_object(
     print(f"  Targets: {target_names}")
     print(f"  Device: {device}")
 
-    if detector_type == "sam3":
+    if detector is not None:
+        # Use pre-loaded detector (cached across episodes)
+        print(f"  Using cached {type(detector).__name__}")
+        is_sam3 = isinstance(detector, Sam3Detector)
+        result = detector.detect(
+            color, target_names,
+            conf_threshold=0.0 if is_sam3 else conf_threshold,
+        )
+    elif detector_type == "sam3":
         detector = Sam3Detector(device=device)
         result = detector.detect(color, target_names, conf_threshold=0.0)
     else:
@@ -498,10 +510,16 @@ def step_7_execute_grasp(
     motion_cfg: dict,
     safety_cfg: dict,
     dry_run: bool = False,
+    skip_confirmation: bool = False,
 ) -> bool:
     """Step 7: Solve IK and execute grasp motion sequence.
 
     Phases: move to pre-grasp → descend to grasp → close gripper → lift.
+
+    Args:
+        skip_confirmation: If True, skip the interactive safety prompt.
+            Useful for automated multi-episode runs where the user has
+            already confirmed the first episode.
     """
     print("\n" + "=" * 60)
     print("STEP 7: IK Solve & Execute Grasp")
@@ -529,7 +547,7 @@ def step_7_execute_grasp(
         current_joints = np.array([0.0, 1.0, -0.93, 0.83, 0.0, 0.0])
 
     # Safety confirmation
-    if not dry_run:
+    if not dry_run and not skip_confirmation:
         # Flush any stray keystrokes that leaked from cv2 windows to stdin
         import sys, termios
         try:
