@@ -1,0 +1,108 @@
+schema_version: 1
+policy:
+  strategy: facade-first
+  requirement: characterize existing behavior before refactoring
+  credentials_allowed: false
+
+repositories:
+  a1x_sdk_integration:
+    path_hint: A1Xsdk
+    branch: main
+    commit: 72211365345c8a0b89d53a59795e53ca20fc2a54
+    include:
+      - a1x_control.py
+      - examples/motion/
+      - examples/yoloe_grasp/
+      - examples/handeye/handeye_calibration.yaml
+    note: A1X motion, D405, and hand-eye contracts referenced by thin ENPIRE adapters; source files remain unchanged by the integration.
+  agentlace_data_restoration:
+    path_hint: minimal_policy
+    branch: tonghe/ziptie-autorl-merge-wenlix
+    commit: 49813892194d9e85a2fa115e84440c0b2d1ccd76
+    include:
+      - third_party/agentlace/agentlace/data/data_store.py
+    note: Restore omitted dependency source intact; no algorithm changes.
+  cap_atomic_scripts_baseline:
+    path_hint: ENPIRE
+    branch: revision-0901
+    commit: 70f3d95d0df4db1ee2e07aa1368d4f66c12093fd
+    license_status: Apache-2.0
+    include:
+      - enpire/env/forge/run_script.py
+      - enpire/env/forge/cap/agent/agent_config.py
+      - enpire/env/forge/cap/agent/tools/grasp_3d_bb.py
+      - enpire/env/forge/cap/saved_scripts/skill_library/move_to_pose.py
+      - enpire/env/forge/cap/saved_scripts/skill_library/set_gripper.py
+    characterization:
+      - tests/enpire/cap/test_move_to_pose.py
+      - tests/test_run_script_resolve_file.py
+
+  cap_generic_motion_baseline:
+    path_hint: ENPIRE
+    branch: revision-0901
+    commit: 3a54dff956244a3e5940457d4527d5c69f75dec6
+    license_status: Apache-2.0
+    include:
+      - enpire/env/forge/cap/agent/tools/freespace_move.py
+      - enpire/env/forge/cap/agent/tools/native.py
+      - enpire/env/forge/cap/agent/tools/__init__.py
+    characterization: tests/enpire/cap/test_move_to_pose.py
+
+  target:
+    path_hint: ENPIRE
+    branch: release
+    commit: 2b34f9d
+    license_status: Apache-2.0
+
+  forge_pusht:
+    path_hint: forge
+    branch: internal-forge
+    commit: 3cc5e899
+    license_status: Apache-2.0
+    include:
+      - cap/saved_scripts/place_grasped_t_reset.py
+      - cap/saved_scripts/pusht/
+      - rl/pusht/
+      - rl/pusht_runner.py
+      - tmux/realworld_rl/pusht_supervisor.py
+      - tmux/realworld_rl/rl_pusht.sh
+      - tmux/realworld_rl/tasks_config/pusht/
+
+  minimal_policy_pld:
+    path_hint: minimal_policy
+    branches:
+      - name: origin/main
+        commit: abae3de
+      - name: internal-forge
+        commit: 1f7378d
+      - name: internal-forge
+        commit: cba0c0a
+      - name: internal-forge
+        commit: 81988f0
+    license_status: source-mit-license-copied-root-review-still-required
+    include:
+      - scripts/pld_lite/
+      - scripts/actor_gear.sh
+      - scripts/learner_gear.sh
+      - scripts/sr_rolling_window.py
+      - configs/action_scaling/
+      - configs/action_transform/
+      - configs/env/remote_deployment.yaml
+      - configs/experiment/pin_insertion_delta_eef.yaml
+      - configs/experiment/gpu_insertion_delta_eef.yaml
+      - configs/experiment/ziptie_delta_eef.yaml
+      - configs/task/remote_yam*.yaml
+      - configs/train/sac_mini.yaml
+      - serl_launcher/serl_launcher/agents/continuous/sac_mini.py
+      - serl_launcher/serl_launcher/common/
+      - serl_launcher/serl_launcher/data_andy_fix/
+      - serl_launcher/serl_launcher/env/remote_deployment_env.py
+      - serl_launcher/serl_launcher/networks/
+      - serl_launcher/serl_launcher/vision/
+      - third_party/agentlace/
+    exclude:
+      - token_usage/
+      - research_notes/
+      - third_party/Isaac-GR00T
+      - flywheel/yam_env/
+    exclusion_reason: retain only the PLD real-world actor/learner dependency closure

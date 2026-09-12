@@ -1,0 +1,33 @@
+# @package _global_
+defaults:
+  - override /robot: real_a1x
+
+name: a1x-real-agent
+runtime:
+  agent_name: a1x
+
+execution:
+  n_seeds: 1
+  mode: sequential
+
+reward:
+  evaluator: noop
+  vlm_backend: nvidia
+  vlm_model: null
+  vlm_camera: wrist
+  vlm_reasoning_effort: high
+
+# Reflection VLM: GLM via the OpenAI-compatible "nvidia" backend
+# (NVIDIA_API_KEY / NVIDIA_VL_BASE_URL / NVIDIA_VL_MODEL in the environment).
+reflection:
+  vlm_backend: nvidia
+  vlm_model: null
+
+code_generator:
+  prompt:
+    - system/agent_identity
+    - system/robotics_engineer
+    - system/workflow
+    - system/rules
+    - system/coding_style
+    - embodiment/a1x_single_arm

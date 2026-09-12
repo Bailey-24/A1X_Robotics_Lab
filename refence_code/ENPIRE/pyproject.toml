@@ -1,0 +1,272 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "enpire"
+version = "0.1.0"
+description = "A repeatable reset-execute-verify-refine harness for robot policies and tools."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+enpire = "enpire.cli:main"
+enpire-run-agent = "enpire.env.forge.run_agent:main"
+enpire-run-script = "enpire.env.forge.run_script:main"
+
+[project.optional-dependencies]
+# Lightweight clients for remote perception services. These do not install
+# local model weights or a CUDA runtime.
+vision = [
+    "opencv-python>=4.10,<5",
+    "pillow>=10",
+    "requests>=2.32",
+]
+
+# Local SAM / detector / encoder execution.
+vision-local = [
+    "fastapi>=0.115",
+    "opencv-python>=4.10,<5",
+    "pillow>=10",
+    "requests>=2.32",
+    "torch>=2.8",
+    "torchvision>=0.23",
+    "transformers>=5.1",
+    "uvicorn>=0.34",
+]
+
+# Local AnyGrasp HTTP service. The licensed AnyGrasp SDK, checkpoint, and
+# license archive remain external and are supplied with environment variables.
+grasping-local = [
+    "fastapi>=0.115",
+    "graspnetAPI",
+    "open3d>=0.19",
+    "opencv-python>=4.10,<5",
+    "torch>=2.8",
+    "uvicorn>=0.34",
+]
+
+# Kinematics and generic planning clients. The CUDA-bound cuRobo server uses
+# its own tool bundle so a core lock never has to build it.
+planning = [
+    "mink==0.0.12",
+    "mujoco>=3.5",
+    "pin-pink",
+    "portal>=3.7.3",
+    "pyroki",
+    "scipy>=1.15",
+    "yourdfpy==0.0.59",
+]
+
+# Local CUDA cuRobo server. cuRobo v0.8.0 is Apache-2.0; this extra requires
+# a matching NVIDIA driver, CUDA toolkit, and compiler.
+planning-local = [
+    "ninja",
+    "nvidia-curobo[cu12]",
+    "portal>=3.7.3",
+    "torch>=2.8",
+    # Keep the Warp version validated with ENPIRE's cuRobo v0.8 migration.
+    "warp-lang==1.12.0",
+    "yourdfpy==0.0.59",
+]
+
+# YAM control is independent from camera SDKs so headless control machines do
+# not need to install camera wheels.
+control-yam = [
+    "damiao-motor>=1.0.7b1",
+    "gymnasium>=1.2",
+    "mink==0.0.12",
+    "msgpack>=1.0",
+    "mujoco>=3.5",
+    "portal>=3.7.3",
+    "pyserial>=3.5",
+    "scipy>=1.15",
+    "tyro>=0.9",
+    "pyzmq>=27",
+]
+
+# Optional I2RT leader/teaching-handle support. The MIT-licensed source and
+# YAM gravity-compensation model are vendored so this does not depend on a
+# sibling Forge checkout.
+control-i2rt = [
+    "i2rt",
+]
+camera-realsense = [
+    "opencv-python>=4.10,<5",
+    "pyrealsense2==2.56.5.9235; sys_platform == 'linux'",
+]
+camera-zed = [
+    "opencv-python>=4.10,<5",
+    "pyzed @ https://download.stereolabs.com/zedsdk/5.2/whl/linux_x86_64/pyzed-5.2-cp311-cp311-linux_x86_64.whl ; sys_platform == 'linux' and python_version < '3.12'",
+]
+
+calibration = [
+    "damiao-motor>=1.0.7b1",
+    "mujoco>=3.5",
+    "opencv-contrib-python>=4.10,<5",
+    "portal>=3.7.3",
+    "pyrealsense2==2.56.5.9235; sys_platform == 'linux'",
+    "scipy>=1.15",
+]
+
+vlm = [
+    "google-genai>=1.0",
+    "openai>=1.0",
+    "pillow>=10",
+    "requests>=2.32",
+]
+
+# Original Hydra run_script entry and its dependency-light tool clients.
+cap = [
+    "hydra-core>=1.3",
+    "omegaconf>=2.3",
+    "opencv-python>=4.10,<5",
+    "pillow>=10",
+    "requests>=2.32",
+    "scipy>=1.15",
+]
+
+# Forge real-world actor bridge, recording, teleoperation, and dashboards.
+# Robot/camera dependencies remain separate so a learner-only host stays small.
+real-rl = [
+    "evdev>=1.9; sys_platform == 'linux'",
+    "fastapi>=0.115",
+    "gymnasium>=1.2",
+    "lz4>=4.4",
+    "opencv-python>=4.10,<5",
+    "pillow>=10",
+    "portal>=3.7.3",
+    "pynput>=1.7",
+    "requests>=2.32",
+    "scipy>=1.15",
+    "torch>=2.8",
+    "tyro>=0.9",
+    "uvicorn>=0.34",
+    "pyzmq>=27",
+]
+
+# PLD command/config inspection. The CUDA/JAX learner has an isolated uv
+# project under enpire/policy/pld/runtime so it cannot constrain robot extras.
+pld = [
+    "hydra-core>=1.3",
+    "omegaconf>=2.3",
+]
+
+dev = [
+    "coverage[toml]>=7.6",
+    "evdev>=1.9; sys_platform == 'linux'",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "msgpack>=1.0",
+    "pandas>=2.2",
+    "pillow>=10",
+    "pytest>=8.3",
+    "pytest-cov>=6",
+    "requests>=2.32",
+    "ruff>=0.9",
+    "scipy>=1.15",
+    "uvicorn>=0.34",
+]
+
+[tool.setuptools.packages.find]
+include = ["enpire*"]
+exclude = [
+    "data*",
+    "logs*",
+    "outputs*",
+    "scripts*",
+    "third_party*",
+]
+
+[tool.setuptools.package-data]
+enpire = ["**/*.md", "**/*.yaml", "**/*.yml", "**/*.json", "**/*.xml", "**/*.stl"]
+
+[tool.uv.sources]
+pyroki = { path = "third_party/pyroki", editable = true }
+nvidia-curobo = { path = "third_party/curobo", editable = true }
+i2rt = { path = "third_party/i2rt", editable = true }
+torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+
+[tool.uv.extra-build-dependencies]
+nvidia-curobo = ["setuptools"]
+
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
+no-build-isolation-package = ["nvidia-curobo"]
+override-dependencies = [
+    "mujoco>=3.5",
+    "numpy>=1.26",
+    "PyOpenGL>=3.1.7",
+    "transforms3d>=0.4",
+]
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+# Vendored packages such as third_party.overlay_viz are imported directly by
+# tests. Put the repo root on sys.path explicitly rather than relying on an
+# unrelated test module doing the insertion as an import side effect.
+pythonpath = ["."]
+markers = [
+    "hardware: requires connected robot or camera hardware",
+    "integration: requires optional services or multiple processes",
+    "network: requires external network access or credentials",
+    "slow: takes longer than a normal unit test",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    "third_party",
+    "enpire/policy/pld/runtime/.venv",
+    "enpire/policy/pld/runtime/vendor",
+    "enpire/policy/pld/runtime/src",
+    "enpire/env/forge/outputs",
+    "enpire/env/forge/logs",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"enpire/env/forge/yam/registration/_legacy_identify.py" = ["E501", "I001"]
+"tests/enpire/yam/test_calibration_cv.py" = ["E402"]
+# CaP skill scripts use `from skill_library.namespace import *` by design;
+# F821/F405 are expected and cannot be resolved without breaking the runtime contract.
+# E702/E701/E703 reflect terse one-liner style common in these dense skill files.
+"enpire/env/forge/cap/saved_scripts/**" = ["F821", "F405", "E402", "E702", "E701", "E703", "E741", "W291", "W293", "F541"]
+# These directories contain standalone scripts / servers that manipulate sys.path
+# before importing optional heavy dependencies — E402 is intentional there.
+"enpire/env/forge/cap/agent/**" = ["E402"]
+"enpire/env/forge/cap/server/**" = ["E402"]
+"enpire/env/forge/cap/skills/**" = ["E402"]
+"enpire/env/forge/experimental/**" = ["E402"]
+"enpire/env/forge/scripts/**" = ["E402"]
+"enpire/env/forge/robot/**" = ["E402"]
+"enpire/env/forge/run_agent.py" = ["E402"]
+"enpire/env/forge/run_script.py" = ["E402"]
+"enpire/policy/rl/**" = ["E402"]
+"enpire/env/forge/tools/**" = ["E402", "E702", "E701", "E741", "W291", "W293"]
+"enpire/env/forge/cap/agent/tools/detection.py" = ["E402", "E702", "E701", "E741", "F541"]
+"enpire/env/forge/cap/env/**" = ["E702", "E701", "E741", "W291", "W293"]
+"enpire/env/forge/robot/systemid/**" = ["E702", "E701", "E741"]

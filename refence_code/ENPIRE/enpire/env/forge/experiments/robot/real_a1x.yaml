@@ -1,0 +1,23 @@
+# @package _global_
+robot:
+  adapter:
+    _target_: enpire.env.forge.cap.agent.robot_adapters.real_a1x.RealA1XAdapter
+  script_backend:
+    _target_: enpire.env.forge.cap.agent.script_backends.RealA1XBackend
+  bridge_url: ${oc.env:A1X_BRIDGE_URL,http://127.0.0.1:11337}
+  camera_name: wrist
+  camera_fps: 15
+  calibration_path: ${oc.env:A1X_HAND_EYE_CALIBRATION,''}
+  table_z_m: ${oc.env:A1X_TABLE_Z_M,0.0}
+  go_home_on_exit: false
+
+env:
+  name: a1x-real
+  camera_width: 640
+  camera_height: 480
+
+recording:
+  cameras: [wrist]
+
+reflection:
+  cameras: [wrist]

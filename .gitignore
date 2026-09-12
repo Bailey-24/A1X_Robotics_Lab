@@ -16,3 +16,12 @@ examples/camera/captured_frames/
 
 .pytest_cache
 .TimeRecord
+
+data/
+
+# ENPIRE: rebuildable or run-time artifacts (uv sync / scripts/a1x.sh recreate them)
+refence_code/ENPIRE/.venv/
+refence_code/ENPIRE/third_party/
+refence_code/ENPIRE/logs/
+refence_code/ENPIRE/enpire.egg-info/
+.ruff_cache/
